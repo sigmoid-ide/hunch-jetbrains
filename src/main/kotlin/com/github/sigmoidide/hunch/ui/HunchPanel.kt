@@ -22,24 +22,31 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.CollectionListModel
+import com.intellij.ui.JBColor
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.awt.RelativePoint
+import com.intellij.ui.components.ActionLink
+import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
+import com.intellij.util.ui.UIUtil
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.awt.BorderLayout
+import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import java.io.IOException
 import java.time.format.DateTimeFormatter
 import javax.swing.Icon
+import javax.swing.JPanel
 import javax.swing.ListSelectionModel
 import javax.swing.table.AbstractTableModel
 
@@ -67,6 +74,14 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     private var scopeCounts: Map<String, Int> = emptyMap()
     private var updatingScopes = false
 
+    /** Under the table: how many quick runs are hidden, so a run never just disappears. */
+    private val quickRunsBar = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0))
+    private val quickRunsNote = JBLabel()
+    private val quickRunsLink = ActionLink("") {
+        showAll = !showAll
+        update(state)
+    }
+
     /** Set after saving a milestone: the milestones before it, so the new one can be selected. */
     private var selectNewMilestoneAfter: Set<String>? = null
 
@@ -74,7 +89,14 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         configureTable()
         configureScopeList()
         val splitter = OnePixelSplitter(false, "hunch.details.split", 0.64f)
-        splitter.firstComponent = ScrollPaneFactory.createScrollPane(table, true)
+        quickRunsBar.add(quickRunsNote)
+        quickRunsBar.add(quickRunsLink)
+        quickRunsBar.border = JBUI.Borders.compound(JBUI.Borders.customLineTop(JBColor.border()), JBUI.Borders.empty(3, 6))
+        quickRunsNote.foreground = UIUtil.getContextHelpForeground()
+        splitter.firstComponent = JPanel(BorderLayout()).apply {
+            add(ScrollPaneFactory.createScrollPane(table, true), BorderLayout.CENTER)
+            add(quickRunsBar, BorderLayout.SOUTH)
+        }
         splitter.secondComponent = details
         outer.secondComponent = splitter
         setContent(outer)
@@ -227,8 +249,18 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 empty.appendLine("Your next runs will appear here.")
             }
             inScope.isEmpty() -> empty.text = "This milestone covers no runs"
-            else -> empty.text = "$hidden quick crash${if (hidden == 1) "" else "es"} hidden"
+            else -> empty.text = "No runs to show"
         }
+        val quick = inScope.count { it.trivial }
+        val runs = if (quick == 1) "1 quick run" else "$quick quick runs"
+        quickRunsBar.isVisible = hidden > 0 || (showAll && quick > 0)
+        quickRunsNote.text = if (hidden > 0) {
+            if (hidden == 1) "1 quick run hidden (stopped or crashed in under 30 seconds)"
+            else "$hidden quick runs hidden (stopped or crashed in under 30 seconds)"
+        } else {
+            "Showing $runs (stopped or crashed in under 30 seconds)"
+        }
+        quickRunsLink.text = if (hidden > 0) "Show" else "Hide"
 
         rows.forEachIndexed { index, row ->
             if (row.run.id in selectedIds) table.selectionModel.addSelectionInterval(index, index)
@@ -464,7 +496,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         }
     }
 
-    private inner class ShowAllToggle : DumbAwareToggleAction("Show Quick Crashes", "Show runs that failed in under 30 seconds", AllIcons.General.Filter) {
+    private inner class ShowAllToggle : DumbAwareToggleAction("Show Quick Crashes", "Show runs that stopped or crashed in under 30 seconds", AllIcons.General.Filter) {
         override fun getActionUpdateThread() = ActionUpdateThread.EDT
         override fun isSelected(e: AnActionEvent) = showAll
 
