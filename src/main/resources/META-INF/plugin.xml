@@ -16,5 +16,6 @@
                     factoryClass="com.github.sigmoidide.hunch.ui.HunchToolWindowFactory"/>
         <notificationGroup id="Hunch" displayType="BALLOON"/>
         <executor implementation="com.github.sigmoidide.hunch.run.HunchExecutor"/>
+        <programRunner implementation="com.github.sigmoidide.hunch.run.HunchProgramRunner"/>
     </extensions>
 </idea-plugin>
