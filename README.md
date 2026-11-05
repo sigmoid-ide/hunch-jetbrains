@@ -27,32 +27,10 @@ and what it showed. Any two runs compare in the diff viewer.
 
 ## Install
 
-Hunch is in review on JetBrains Marketplace. Once it is listed, install it from **Settings | Plugins | Marketplace**
-by searching for "Hunch".
+1. Install Hunch in your project's interpreter: `pip install sigmoid-hunch`
+2. Download the plugin zip from the [latest release](https://github.com/sigmoid-ide/hunch-jetbrains/releases/latest).
+3. In PyCharm, open **Settings | Plugins | ⚙ | Install Plugin from Disk...** and pick the zip.
 
-Until then, take `hunch-jetbrains-0.1.1.zip` from the latest
-[CI run](https://github.com/sigmoid-ide/hunch-jetbrains/actions/workflows/ci.yml?query=branch%3Amain) (needs a GitHub
-login) or build it with `./gradlew buildPlugin`, then in PyCharm open
-**Settings | Plugins | ⚙ | Install Plugin from Disk...** and pick the zip.
-
-The plugin reads the `.hunch` folder Hunch writes, so record runs with Hunch as usual: `pip install sigmoid-hunch`
-in your project's interpreter. Saving milestones needs Hunch 0.3 or newer.
-
-## Develop
-
-```bash
-./gradlew test       # reads a store written by the real hunch CLI
-./gradlew runIde     # a sandbox PyCharm with the plugin
-```
-
-To try it on a week of made-up runs, build the demo project (it lands in `hunch-demo`, next to this
-repository), then open it in the sandbox:
-
-```bash
-python src/test/fixtures/make_demo.py <python with hunch installed>
-./gradlew runIde --args="<path to hunch-demo>"
-```
-
-`src/test/fixtures/make_store.py` rebuilds the test store the same way.
+Hunch is in review on JetBrains Marketplace. Once it is listed, you can install it from **Settings | Plugins** instead.
 
 <p align="center">Apache-2.0 · Part of Sigmoid IDE · Like it? Give it a star.</p>
