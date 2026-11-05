@@ -15,25 +15,28 @@
 Your [Hunch](https://github.com/sigmoid-ide/hunch) runs in a tool window: what each run tried, how it went,
 and what it showed. Any two runs compare in the diff viewer.
 
+<p align="center">
+  <img src="media/marketplace/01-runs.png" width="100%" alt="The Hunch tool window in PyCharm: milestones, the tree of runs with their metric curves and conclusions, and one run's details" />
+</p>
+
 - **The tree of runs**, with each run's hypothesis, main metric and its curve, and your conclusion. It updates while runs train.
+- **Run with Hunch**: one click next to the Run widget runs any Python configuration under Hunch, asking why first.
 - **Keep or drop** a run, write its conclusion, or fix its hypothesis, right from the table.
 - **Compare** two runs, or a run with the one it came from (Ctrl+D): config, metrics and every changed code file.
 - **Milestones**: save one from the toolbar when you find something worth remembering, then browse your runs milestone by milestone.
 
 ## Install
 
-The plugin is not on JetBrains Marketplace yet. Build it, then in PyCharm open
-**Settings | Plugins | ⚙ | Install Plugin from Disk...** and pick the zip:
+Hunch is in review on JetBrains Marketplace. Once it is listed, install it from **Settings | Plugins | Marketplace**
+by searching for "Hunch".
 
-```bash
-./gradlew buildPlugin   # build/distributions/hunch-jetbrains-0.1.0.zip
-```
+Until then, take `hunch-jetbrains-0.1.1.zip` from the latest
+[CI run](https://github.com/sigmoid-ide/hunch-jetbrains/actions/workflows/ci.yml?query=branch%3Amain) (needs a GitHub
+login) or build it with `./gradlew buildPlugin`, then in PyCharm open
+**Settings | Plugins | ⚙ | Install Plugin from Disk...** and pick the zip.
 
-Every [CI run](https://github.com/sigmoid-ide/hunch-jetbrains/actions/workflows/ci.yml) also keeps the zip as a download.
-
-The plugin reads the `.hunch` folder Hunch writes, so record runs with Hunch as usual (`pip install sigmoid-hunch`).
-Saving milestones runs `hunch milestone` with the project's interpreter; until the next Hunch release, that needs
-Hunch from main: `pip install "git+https://github.com/sigmoid-ide/hunch"`.
+The plugin reads the `.hunch` folder Hunch writes, so record runs with Hunch as usual: `pip install sigmoid-hunch`
+in your project's interpreter. Saving milestones needs Hunch 0.3 or newer.
 
 ## Develop
 
