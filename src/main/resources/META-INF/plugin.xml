@@ -38,4 +38,12 @@
         <executor implementation="com.github.sigmoidide.hunch.run.HunchExecutor"/>
         <programRunner implementation="com.github.sigmoidide.hunch.run.HunchProgramRunner"/>
     </extensions>
+
+    <actions>
+        <action id="Hunch.RunWithHunchButton" class="com.github.sigmoidide.hunch.run.RunWithHunchButton"
+                text="Run with Hunch" description="Run the selected configuration and record it with Hunch"
+                icon="/icons/runWithHunch.svg">
+            <add-to-group group-id="RunToolbarMainActionGroup" anchor="after" relative-to-action="RunToolbarTopLevelExecutorActionGroup"/>
+        </action>
+    </actions>
 </idea-plugin>
