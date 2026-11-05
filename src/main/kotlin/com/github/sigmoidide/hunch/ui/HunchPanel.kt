@@ -1,0 +1,334 @@
+package com.github.sigmoidide.hunch.ui
+
+import com.github.sigmoidide.hunch.model.Format
+import com.github.sigmoidide.hunch.model.HunchStore
+import com.github.sigmoidide.hunch.model.Run
+import com.github.sigmoidide.hunch.model.RunGraph
+import com.intellij.icons.AllIcons
+import com.intellij.ide.BrowserUtil
+import com.intellij.ide.actions.RevealFileAction
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.DefaultActionGroup
+import com.intellij.openapi.actionSystem.IdeActions
+import com.intellij.openapi.actionSystem.Separator
+import com.intellij.openapi.application.EDT
+import com.intellij.openapi.project.DumbAwareAction
+import com.intellij.openapi.project.DumbAwareToggleAction
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.SimpleToolWindowPanel
+import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.ui.OnePixelSplitter
+import com.intellij.ui.PopupHandler
+import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.components.JBTextField
+import com.intellij.ui.table.JBTable
+import com.intellij.util.ui.JBUI
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import java.awt.event.MouseAdapter
+import java.awt.event.MouseEvent
+import java.io.IOException
+import java.time.format.DateTimeFormatter
+import javax.swing.Icon
+import javax.swing.ListSelectionModel
+import javax.swing.table.AbstractTableModel
+
+/** The Hunch tool window: the run tree on the left, the selected run's details on the right. */
+class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolWindowPanel(false, true) {
+    private val service = HunchService.getInstance(project)
+    private val model = RunsModel()
+    private val table = JBTable(model)
+    private val details = DetailsPanel(::select)
+    private var state: HunchState = service.state.value
+    private var showAll = false
+    private var shortIds: Map<String, String> = emptyMap()
+
+    init {
+        configureTable()
+        val splitter = OnePixelSplitter(false, "hunch.details.split", 0.62f)
+        splitter.firstComponent = ScrollPaneFactory.createScrollPane(table, true)
+        splitter.secondComponent = details
+        setContent(splitter)
+
+        val actions = DefaultActionGroup(
+            Refresh(), Separator.getInstance(),
+            CompareAction(), Separator.getInstance(),
+            VerdictAction("keep", "Keep", "Mark as worth building on", AllIcons.Actions.Checked),
+            VerdictAction("drop", "Drop", "Mark as a dead end", AllIcons.Actions.Cancel),
+            EditTextAction("note", "Add Note...", "Write what you learned from this run", AllIcons.Actions.Edit),
+            EditTextAction("why", "Edit Why...", "Replace this run's why", AllIcons.Actions.EditSource), Separator.getInstance(),
+            ShowAllToggle(),
+            OpenFolder(),
+        )
+        val toolbar = ActionManager.getInstance().createActionToolbar("HunchToolbar", actions, false)
+        toolbar.targetComponent = table
+        setToolbar(toolbar.component)
+        PopupHandler.installPopupMenu(table, actions, "HunchPopup")
+
+        val job = service.scope.launch(Dispatchers.EDT) {
+            service.state.collect { update(it) }
+        }
+        com.intellij.openapi.util.Disposer.register(parent) { job.cancel() }
+    }
+
+    private fun configureTable() {
+        table.setShowGrid(false)
+        table.intercellSpacing = JBUI.emptySize()
+        table.rowHeight = JBUI.scale(26)
+        table.tableHeader.reorderingAllowed = false
+        table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION)
+        table.emptyText.text = "Loading runs..."
+        table.selectionModel.addListSelectionListener { if (!it.valueIsAdjusting) showDetails() }
+        table.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1) compareSelected()
+            }
+        })
+        val columns = table.columnModel
+        columns.getColumn(COL_GRAPH).cellRenderer = GraphCell()
+        columns.getColumn(COL_RUN).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
+        columns.getColumn(COL_DATE).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
+        columns.getColumn(COL_WHY).cellRenderer = TextCell { run, _ ->
+            if (run?.why == null) SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES else SimpleTextAttributes.REGULAR_ATTRIBUTES
+        }
+        columns.getColumn(COL_RESULT).cellRenderer = TextCell { run, _ ->
+            when (run?.status) {
+                "crashed", "killed" -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, HunchColors.RED)
+                "running" -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, HunchColors.GREEN)
+                "lost" -> SimpleTextAttributes.GRAYED_ATTRIBUTES
+                else -> SimpleTextAttributes.REGULAR_ATTRIBUTES
+            }
+        }
+        columns.getColumn(COL_TREND).cellRenderer = SparklineCell()
+        columns.getColumn(COL_VERDICT).cellRenderer = VerdictCell()
+        columns.getColumn(COL_NOTE).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
+        fixedWidth(COL_RUN, 64)
+        fixedWidth(COL_DATE, 96)
+        fixedWidth(COL_TREND, 84)
+        fixedWidth(COL_VERDICT, 58)
+        columns.getColumn(COL_WHY).preferredWidth = JBUI.scale(260)
+        columns.getColumn(COL_RESULT).preferredWidth = JBUI.scale(200)
+        columns.getColumn(COL_NOTE).preferredWidth = JBUI.scale(220)
+
+        ActionManager.getInstance().getAction(IdeActions.ACTION_SHOW_DIFF_COMMON)?.shortcutSet?.let { shortcuts ->
+            object : DumbAwareAction() {
+                override fun actionPerformed(e: AnActionEvent) = compareSelected()
+            }.registerCustomShortcutSet(shortcuts, table)
+        }
+    }
+
+    private fun fixedWidth(column: Int, width: Int) {
+        val c = table.columnModel.getColumn(column)
+        c.preferredWidth = JBUI.scale(width)
+        c.minWidth = JBUI.scale(width)
+        c.maxWidth = JBUI.scale(width)
+    }
+
+    private fun update(newState: HunchState) {
+        val selectedIds = selectedRuns().map { it.id }.toSet()
+        state = newState
+        val shown = RunGraph.visible(newState.runs, showAll)
+        val rows = RunGraph.rows(shown)
+        shortIds = Format.shortIds(newState.runs.map { it.id })
+        model.set(rows)
+        val graphWidth = GraphCell.width(rows.maxOfOrNull { it.width } ?: 1)
+        table.columnModel.getColumn(COL_GRAPH).let { it.minWidth = graphWidth; it.maxWidth = graphWidth; it.preferredWidth = graphWidth }
+
+        val hidden = newState.runs.size - shown.size
+        val empty = table.emptyText
+        empty.clear()
+        when {
+            !newState.loaded -> empty.text = "Loading runs..."
+            newState.runs.isEmpty() -> {
+                empty.text = "No runs yet"
+                empty.appendLine("Record one with: hunch run -- python train.py")
+                empty.appendLine("Or add hunch.init() to your training script")
+                empty.appendLine("How Hunch works", SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { BrowserUtil.browse(README) }
+            }
+            else -> empty.text = "$hidden quick crash${if (hidden == 1) "" else "es"} hidden"
+        }
+
+        rows.forEachIndexed { index, row ->
+            if (row.run.id in selectedIds) table.selectionModel.addSelectionInterval(index, index)
+        }
+        if (table.selectedRowCount == 0 && rows.isNotEmpty()) table.selectionModel.setSelectionInterval(0, 0)
+        showDetails()
+    }
+
+    private fun showDetails() {
+        val selected = selectedRuns()
+        when (selected.size) {
+            0 -> details.showMessage(if (state.runs.isEmpty()) "Your runs will appear here." else "Select a run to see its details.")
+            1 -> details.show(selected[0], state.runs.associateBy { it.id }, shortIds, state.store, state.mainMetric)
+            2 -> details.showMessage("2 runs selected. Press Ctrl+D or double-click to compare them.")
+            else -> details.showMessage("${selected.size} runs selected.")
+        }
+    }
+
+    private fun selectedRuns(): List<Run> = table.selectedRows.toList().mapNotNull { model.rows.getOrNull(it)?.run }
+
+    private fun select(runId: String) {
+        val index = model.rows.indexOfFirst { it.run.id == runId }
+        if (index < 0) return
+        table.selectionModel.setSelectionInterval(index, index)
+        table.scrollRectToVisible(table.getCellRect(index, 0, true))
+    }
+
+    /** Two selected runs: compare them, older first. One: compare it with its parent. */
+    private fun compareSelected() {
+        val selected = selectedRuns()
+        val byId = state.runs.associateBy { it.id }
+        val (before, after) = when (selected.size) {
+            2 -> selected.sortedBy { it.started }.let { it[0] to it[1] }
+            1 -> {
+                val run = selected[0]
+                val parent = run.parent?.let(byId::get)
+                if (parent == null) {
+                    Compare.notify(project, "This run has no parent to compare with. Select two runs to compare them.")
+                    return
+                }
+                parent to run
+            }
+            else -> return
+        }
+        Compare.show(project, state.store, before, after, shortIds)
+    }
+
+    private fun annotate(kind: String, value: String) {
+        val runs = selectedRuns()
+        val store = state.store
+        service.scope.launch(Dispatchers.IO) {
+            try {
+                runs.forEach { store.annotate(it, kind, value) }
+            } catch (e: IOException) {
+                Compare.notify(project, "Couldn't save: ${e.message}")
+            }
+            service.refresh()
+        }
+    }
+
+    /** A small popup with one text field: Enter saves, Escape cancels. */
+    private fun askText(title: String, initial: String, onSave: (String) -> Unit) {
+        val field = JBTextField(initial, 40)
+        val popup = JBPopupFactory.getInstance()
+            .createComponentPopupBuilder(field, field)
+            .setTitle(title)
+            .setRequestFocus(true)
+            .setFocusable(true)
+            .setMovable(true)
+            .setCancelOnClickOutside(true)
+            .createPopup()
+        field.addActionListener {
+            val text = field.text.trim()
+            popup.closeOk(null)
+            if (text.isNotEmpty()) onSave(text)
+        }
+        popup.showInCenterOf(table)
+    }
+
+    private inner class RunsModel : AbstractTableModel() {
+        var rows: List<RunGraph.Row> = emptyList()
+            private set
+
+        fun set(newRows: List<RunGraph.Row>) {
+            rows = newRows
+            fireTableDataChanged()
+        }
+
+        override fun getRowCount() = rows.size
+        override fun getColumnCount() = COLUMNS.size
+        override fun getColumnName(column: Int) = COLUMNS[column]
+
+        override fun getValueAt(rowIndex: Int, column: Int): Any? {
+            val row = rows[rowIndex]
+            val run = row.run
+            return when (column) {
+                COL_GRAPH -> row
+                COL_RUN -> run to (shortIds[run.id] ?: run.id)
+                COL_DATE -> run to run.started.format(DATE)
+                COL_WHY -> run to (run.why ?: "(no why)")
+                COL_RESULT -> run to Format.result(run, state.mainMetric)
+                COL_TREND -> run.mainMetric(state.mainMetric)?.let { run.spark(it) to (run.status == "crashed") }
+                COL_VERDICT -> run.verdict
+                COL_NOTE -> run to run.conclusion.orEmpty()
+                else -> null
+            }
+        }
+    }
+
+    private abstract inner class RunAction(text: String, description: String, icon: Icon?) : DumbAwareAction(text, description, icon) {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+    }
+
+    private inner class Refresh : RunAction("Refresh", "Reload runs from .hunch", AllIcons.Actions.Refresh) {
+        override fun actionPerformed(e: AnActionEvent) = service.refresh()
+    }
+
+    private inner class CompareAction : RunAction("Compare", "Compare with the parent run, or compare two selected runs", AllIcons.Actions.Diff) {
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = table.selectedRowCount in 1..2
+        }
+
+        override fun actionPerformed(e: AnActionEvent) = compareSelected()
+    }
+
+    private inner class VerdictAction(private val verdict: String, text: String, description: String, icon: Icon) :
+        RunAction(text, description, icon) {
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = table.selectedRowCount > 0
+        }
+
+        override fun actionPerformed(e: AnActionEvent) = annotate("verdict", verdict)
+    }
+
+    private inner class EditTextAction(private val kind: String, text: String, description: String, icon: Icon) :
+        RunAction(text, description, icon) {
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = table.selectedRowCount == 1
+        }
+
+        override fun actionPerformed(e: AnActionEvent) {
+            val run = selectedRuns().singleOrNull() ?: return
+            val (title, initial) = if (kind == "why") "Why did you run this?" to run.why.orEmpty() else "What did you learn?" to ""
+            askText(title, initial) { annotate(kind, it) }
+        }
+    }
+
+    private inner class ShowAllToggle : DumbAwareToggleAction("Show Quick Crashes", "Show runs that failed in under 30 seconds", AllIcons.General.Filter) {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun isSelected(e: AnActionEvent) = showAll
+
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            showAll = state
+            update(this@HunchPanel.state)
+        }
+    }
+
+    private inner class OpenFolder : RunAction("Open Run Folder", "Show the selected run's files", AllIcons.Actions.MenuOpen) {
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = table.selectedRowCount == 1
+        }
+
+        override fun actionPerformed(e: AnActionEvent) {
+            selectedRuns().singleOrNull()?.let { RevealFileAction.openDirectory(it.dir) }
+        }
+    }
+
+    companion object {
+        private const val README = "https://github.com/sigmoid-ide/hunch#readme"
+        private val DATE = DateTimeFormatter.ofPattern("MMM d HH:mm")
+        private val COLUMNS = arrayOf("", "Run", "Date", "Why", "Result", "Trend", "Verdict", "Note")
+        private const val COL_GRAPH = 0
+        private const val COL_RUN = 1
+        private const val COL_DATE = 2
+        private const val COL_WHY = 3
+        private const val COL_RESULT = 4
+        private const val COL_TREND = 5
+        private const val COL_VERDICT = 6
+        private const val COL_NOTE = 7
+    }
+}

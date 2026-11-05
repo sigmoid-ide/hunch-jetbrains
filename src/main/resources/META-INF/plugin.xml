@@ -1,0 +1,19 @@
+<idea-plugin>
+    <id>com.github.sigmoidide.hunch</id>
+    <name>Hunch</name>
+    <vendor url="https://github.com/sigmoid-ide/hunch">Sigmoid IDE</vendor>
+    <description><![CDATA[
+        <p>Every ML run, remembered: its code, config, environment, metrics and why.</p>
+        <p>Shows your <a href="https://github.com/sigmoid-ide/hunch">Hunch</a> experiment history as a tree,
+        lets you keep or drop runs, add notes, and compare any two runs in the diff viewer.</p>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.python</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Hunch" anchor="bottom" icon="/icons/hunch.svg"
+                    factoryClass="com.github.sigmoidide.hunch.ui.HunchToolWindowFactory"/>
+        <notificationGroup id="Hunch" displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>
