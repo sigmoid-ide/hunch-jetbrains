@@ -85,11 +85,19 @@ for why, parent, code, args, verdict, note, day, minutes in RUNS:
     started = start + timedelta(days=day)
     meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     meta["started_at"] = started.isoformat(timespec="milliseconds")
+    if meta.get("host"):
+        meta["host"]["hostname"] = "workstation"  # keep the real machine name out of screenshots
     (run_dir / "run.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     end = json.loads((run_dir / "end.json").read_text(encoding="utf-8"))
     end["duration"] = minutes * 60.0
     end["ended_at"] = (started + timedelta(minutes=minutes)).isoformat(timespec="milliseconds")
     (run_dir / "end.json").write_text(json.dumps(end, indent=2) + "\n", encoding="utf-8")
+    notes = run_dir / "notes.jsonl"
+    if notes.exists():  # written a few minutes after the run ended, not today
+        events = [json.loads(line) for line in notes.read_text(encoding="utf-8").splitlines() if line.strip()]
+        for i, event in enumerate(events):
+            event["at"] = (started + timedelta(minutes=minutes + 5, seconds=30 * i)).isoformat(timespec="milliseconds")
+        notes.write_text("".join(json.dumps(e, separators=(",", ":"), ensure_ascii=False) + "\n" for e in events), encoding="utf-8")
     if why in MILESTONES:
         title, note, day = MILESTONES[why]
         hunch("milestone", title, *(["-m", note] if note else []))
