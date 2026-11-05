@@ -3,7 +3,8 @@
 Usage: python make_demo.py <python with hunch installed> [output folder]
 
 Records a week of made-up experiments with the real hunch CLI, editing train.py between runs
-so diffs are real, then spreads start times over days so the tree reads like real work.
+so diffs are real, then spreads start times over days so the tree reads like real work. Two
+milestones are saved along the way, so the last three runs are "since the last milestone".
 """
 
 import json
@@ -54,6 +55,12 @@ RUNS = [
     ("batch 512, lr 4e-4", "bigger batch 512", dict(warmup=1000, schedule="cosine", smoothing=0.0, final=2.25, diverge=False), ["--lr", "4e-4", "--batch", "512"], None, None, 5.5, 38),
 ]
 
+# Milestones saved right after a run: (title, note, days after start).
+MILESTONES = {
+    "warmup 1k steps": ("warmup removes the loss spike", None, 1.2),
+    "warmup + cosine decay": ("warmup + cosine beats baseline", "cosine adds a little on top of warmup", 2.9),
+}
+
 
 def hunch(*args):
     subprocess.run([PYTHON, "-m", "hunch", *args], cwd=OUT, check=True, capture_output=True)
@@ -83,5 +90,13 @@ for why, parent, code, args, verdict, note, day, minutes in RUNS:
     end["duration"] = minutes * 60.0
     end["ended_at"] = (started + timedelta(minutes=minutes)).isoformat(timespec="milliseconds")
     (run_dir / "end.json").write_text(json.dumps(end, indent=2) + "\n", encoding="utf-8")
+    if why in MILESTONES:
+        title, note, day = MILESTONES[why]
+        hunch("milestone", title, *(["-m", note] if note else []))
+        saved = max((OUT / ".hunch" / "milestones").iterdir(),
+                    key=lambda p: json.loads((p / "milestone.json").read_text(encoding="utf-8"))["created_at"])
+        meta = json.loads((saved / "milestone.json").read_text(encoding="utf-8"))
+        meta["created_at"] = (start + timedelta(days=day)).isoformat(timespec="milliseconds")
+        (saved / "milestone.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 print("demo project:", OUT)
