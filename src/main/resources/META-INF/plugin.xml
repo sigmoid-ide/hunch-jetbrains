@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.github.sigmoidide.hunch</id>
     <name>Hunch</name>
-    <vendor url="https://github.com/sigmoid-ide">Sigmoid IDE</vendor>
+    <vendor url="https://github.com/sigmoid-ide" email="rainxch.dev@gmail.com">Sigmoid IDE</vendor>
     <description><![CDATA[
         <p>Every ML run, remembered: its code, config, environment, metrics and why.
         Your <a href="https://github.com/sigmoid-ide/hunch">Hunch</a> experiment journal, inside PyCharm.</p>
