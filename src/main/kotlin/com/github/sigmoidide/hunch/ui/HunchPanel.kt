@@ -1,7 +1,6 @@
 package com.github.sigmoidide.hunch.ui
 
 import com.github.sigmoidide.hunch.model.Format
-import com.github.sigmoidide.hunch.model.HunchStore
 import com.github.sigmoidide.hunch.model.Run
 import com.github.sigmoidide.hunch.model.RunGraph
 import com.intellij.icons.AllIcons
@@ -20,10 +19,12 @@ import com.intellij.openapi.project.DumbAwareToggleAction
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.ui.popup.JBPopupFactory
+import com.intellij.openapi.util.Disposer
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
+import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
@@ -31,6 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
+import java.awt.event.MouseMotionAdapter
 import java.io.IOException
 import java.time.format.DateTimeFormatter
 import javax.swing.Icon
@@ -47,38 +49,48 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     private var showAll = false
     private var shortIds: Map<String, String> = emptyMap()
 
+    /** The metric named in the metric column's header. */
+    private var headerMetric: String? = null
+
     init {
         configureTable()
-        val splitter = OnePixelSplitter(false, "hunch.details.split", 0.62f)
+        val splitter = OnePixelSplitter(false, "hunch.details.split", 0.64f)
         splitter.firstComponent = ScrollPaneFactory.createScrollPane(table, true)
         splitter.secondComponent = details
         setContent(splitter)
 
-        val actions = DefaultActionGroup(
+        val keep = VerdictAction("keep", "Keep", "Worth building on", AllIcons.Actions.Checked)
+        val drop = VerdictAction("drop", "Drop", "A dead end", AllIcons.Actions.Cancel)
+        val conclude = EditTextAction("note", "Write Conclusion...", "What did this run show?", AllIcons.Actions.Edit)
+        val toolbarActions = DefaultActionGroup(
             Refresh(), Separator.getInstance(),
             CompareAction(), Separator.getInstance(),
-            VerdictAction("keep", "Keep", "Mark as worth building on", AllIcons.Actions.Checked),
-            VerdictAction("drop", "Drop", "Mark as a dead end", AllIcons.Actions.Cancel),
-            EditTextAction("note", "Add Note...", "Write what you learned from this run", AllIcons.Actions.Edit),
-            EditTextAction("why", "Edit Why...", "Replace this run's why", AllIcons.Actions.EditSource), Separator.getInstance(),
+            keep, drop, conclude, Separator.getInstance(),
             ShowAllToggle(),
             OpenFolder(),
         )
-        val toolbar = ActionManager.getInstance().createActionToolbar("HunchToolbar", actions, false)
+        val toolbar = ActionManager.getInstance().createActionToolbar("HunchToolbar", toolbarActions, false)
         toolbar.targetComponent = table
         setToolbar(toolbar.component)
-        PopupHandler.installPopupMenu(table, actions, "HunchPopup")
+
+        val menu = DefaultActionGroup(
+            CompareAction(), Separator.getInstance(),
+            keep, drop, conclude,
+            EditTextAction("why", "Edit Hypothesis...", "Why you ran it", null), Separator.getInstance(),
+            OpenFolder(),
+        )
+        PopupHandler.installPopupMenu(table, menu, "HunchPopup")
 
         val job = service.scope.launch(Dispatchers.EDT) {
             service.state.collect { update(it) }
         }
-        com.intellij.openapi.util.Disposer.register(parent) { job.cancel() }
+        Disposer.register(parent) { job.cancel() }
     }
 
     private fun configureTable() {
         table.setShowGrid(false)
         table.intercellSpacing = JBUI.emptySize()
-        table.rowHeight = JBUI.scale(26)
+        table.rowHeight = JBUI.scale(28)
         table.tableHeader.reorderingAllowed = false
         table.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION)
         table.emptyText.text = "Loading runs..."
@@ -88,31 +100,40 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 if (e.clickCount == 2 && e.button == MouseEvent.BUTTON1) compareSelected()
             }
         })
+
         val columns = table.columnModel
         columns.getColumn(COL_GRAPH).cellRenderer = GraphCell()
         columns.getColumn(COL_RUN).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
-        columns.getColumn(COL_DATE).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
-        columns.getColumn(COL_WHY).cellRenderer = TextCell { run, _ ->
+        columns.getColumn(COL_STARTED).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
+        columns.getColumn(COL_HYPOTHESIS).cellRenderer = TextCell { run, _ ->
             if (run?.why == null) SimpleTextAttributes.GRAYED_ITALIC_ATTRIBUTES else SimpleTextAttributes.REGULAR_ATTRIBUTES
         }
-        columns.getColumn(COL_RESULT).cellRenderer = TextCell { run, _ ->
-            when (run?.status) {
-                "crashed", "killed" -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, HunchColors.RED)
-                "running" -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, HunchColors.GREEN)
-                "lost" -> SimpleTextAttributes.GRAYED_ATTRIBUTES
-                else -> SimpleTextAttributes.REGULAR_ATTRIBUTES
-            }
-        }
-        columns.getColumn(COL_TREND).cellRenderer = SparklineCell()
-        columns.getColumn(COL_VERDICT).cellRenderer = VerdictCell()
-        columns.getColumn(COL_NOTE).cellRenderer = TextCell { _, _ -> SimpleTextAttributes.GRAYED_ATTRIBUTES }
+        columns.getColumn(COL_METRIC).cellRenderer = MetricCell()
+        columns.getColumn(COL_CONCLUSION).cellRenderer = ConclusionCell()
         fixedWidth(COL_RUN, 64)
-        fixedWidth(COL_DATE, 96)
-        fixedWidth(COL_TREND, 84)
-        fixedWidth(COL_VERDICT, 58)
-        columns.getColumn(COL_WHY).preferredWidth = JBUI.scale(260)
-        columns.getColumn(COL_RESULT).preferredWidth = JBUI.scale(200)
-        columns.getColumn(COL_NOTE).preferredWidth = JBUI.scale(220)
+        fixedWidth(COL_STARTED, 104)
+        fixedWidth(COL_METRIC, 100 + MetricCell.CURVE_WIDTH)
+        columns.getColumn(COL_HYPOTHESIS).preferredWidth = JBUI.scale(280)
+        columns.getColumn(COL_CONCLUSION).preferredWidth = JBUI.scale(280)
+
+        // What each column means, on hover; the metric column also picks the metric on click.
+        val header = table.tableHeader
+        header.addMouseMotionListener(object : MouseMotionAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                header.toolTipText = when (header.columnAtPoint(e.point)) {
+                    COL_RUN -> "The end of the run's id. Use it with hunch show and hunch diff."
+                    COL_HYPOTHESIS -> "Why you ran it, written before the run (hunch run -m). Right-click to edit."
+                    COL_METRIC -> "This metric at the end of each run, and how it moved during the run. Click to choose another metric."
+                    COL_CONCLUSION -> "What the run showed, written after it, and whether to keep building on it or drop it (hunch note)."
+                    else -> null
+                }
+            }
+        })
+        header.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                if (header.columnAtPoint(e.point) == COL_METRIC) chooseMetric(RelativePoint(e))
+            }
+        })
 
         ActionManager.getInstance().getAction(IdeActions.ACTION_SHOW_DIFF_COMMON)?.shortcutSet?.let { shortcuts ->
             object : DumbAwareAction() {
@@ -134,7 +155,11 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         val shown = RunGraph.visible(newState.runs, showAll)
         val rows = RunGraph.rows(shown)
         shortIds = Format.shortIds(newState.runs.map { it.id })
+        headerMetric = newState.mainMetric
+            ?: shown.mapNotNull { it.mainMetric(null) }.groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
         model.set(rows)
+        table.columnModel.getColumn(COL_METRIC).headerValue = headerMetric ?: "Metric"
+        table.tableHeader.repaint()
         val graphWidth = GraphCell.width(rows.maxOfOrNull { it.width } ?: 1)
         table.columnModel.getColumn(COL_GRAPH).let { it.minWidth = graphWidth; it.maxWidth = graphWidth; it.preferredWidth = graphWidth }
 
@@ -145,8 +170,8 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             !newState.loaded -> empty.text = "Loading runs..."
             newState.runs.isEmpty() -> {
                 empty.text = "No runs yet"
-                empty.appendLine("Record one with: hunch run -- python train.py")
-                empty.appendLine("Or add hunch.init() to your training script")
+                empty.appendLine("Record one with: hunch run -m \"your hypothesis\" -- python train.py")
+                empty.appendLine("or add hunch.init() to your training script")
                 empty.appendLine("How Hunch works", SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { BrowserUtil.browse(README) }
             }
             else -> empty.text = "$hidden quick crash${if (hidden == 1) "" else "es"} hidden"
@@ -163,7 +188,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         val selected = selectedRuns()
         when (selected.size) {
             0 -> details.showMessage(if (state.runs.isEmpty()) "Your runs will appear here." else "Select a run to see its details.")
-            1 -> details.show(selected[0], state.runs.associateBy { it.id }, shortIds, state.store, state.mainMetric)
+            1 -> details.show(selected[0], state.runs.associateBy { it.id }, shortIds, state.store, headerMetric)
             2 -> details.showMessage("2 runs selected. Press Ctrl+D or double-click to compare them.")
             else -> details.showMessage("${selected.size} runs selected.")
         }
@@ -178,7 +203,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         table.scrollRectToVisible(table.getCellRect(index, 0, true))
     }
 
-    /** Two selected runs: compare them, older first. One: compare it with its parent. */
+    /** Two selected runs: compare them, older first. One: compare it with the run it came from. */
     private fun compareSelected() {
         val selected = selectedRuns()
         val byId = state.runs.associateBy { it.id }
@@ -188,7 +213,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 val run = selected[0]
                 val parent = run.parent?.let(byId::get)
                 if (parent == null) {
-                    Compare.notify(project, "This run has no parent to compare with. Select two runs to compare them.")
+                    Compare.notify(project, "This run didn't come from another run. Select two runs to compare them.")
                     return
                 }
                 parent to run
@@ -196,6 +221,25 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             else -> return
         }
         Compare.show(project, state.store, before, after, shortIds)
+    }
+
+    private fun chooseMetric(where: RelativePoint) {
+        val names = state.runs.flatMap { it.metricKeys }.groupingBy { it }.eachCount()
+            .entries.sortedByDescending { it.value }.map { it.key }
+        if (names.isEmpty()) return
+        val automatic = "Automatic (first metric with \"val\" in its name)"
+        JBPopupFactory.getInstance()
+            .createPopupChooserBuilder(listOf(automatic) + names)
+            .setTitle("Metric to Show")
+            .setItemChosenCallback { choice ->
+                val store = state.store
+                service.scope.launch(Dispatchers.IO) {
+                    store.setMainMetric(if (choice == automatic) null else choice)
+                    service.refresh()
+                }
+            }
+            .createPopup()
+            .show(where)
     }
 
     private fun annotate(kind: String, value: String) {
@@ -212,8 +256,9 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     }
 
     /** A small popup with one text field: Enter saves, Escape cancels. */
-    private fun askText(title: String, initial: String, onSave: (String) -> Unit) {
-        val field = JBTextField(initial, 40)
+    private fun askText(title: String, placeholder: String, initial: String, onSave: (String) -> Unit) {
+        val field = JBTextField(initial, 44)
+        field.emptyText.text = placeholder
         val popup = JBPopupFactory.getInstance()
             .createComponentPopupBuilder(field, field)
             .setTitle(title)
@@ -228,6 +273,20 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             if (text.isNotEmpty()) onSave(text)
         }
         popup.showInCenterOf(table)
+    }
+
+    private fun metricValue(run: Run): MetricValue {
+        val key = run.mainMetric(state.mainMetric)
+        val value = key?.let { run.finalMetrics[it] }
+        val label = if (key != null && key != headerMetric) "$key " else ""
+        val text = when (run.status) {
+            "finished" -> value?.let { label + Format.value(it) } ?: ""
+            "crashed" -> run.exitCode?.let { "crashed, exit $it" } ?: "crashed"
+            "killed" -> "stopped"
+            "running" -> "running " + Format.duration(System.currentTimeMillis() / 1000.0 - run.started.toEpochSecond())
+            else -> run.status
+        }
+        return MetricValue(text, key?.let(run::spark).orEmpty(), run.status)
     }
 
     private inner class RunsModel : AbstractTableModel() {
@@ -249,12 +308,10 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             return when (column) {
                 COL_GRAPH -> row
                 COL_RUN -> run to (shortIds[run.id] ?: run.id)
-                COL_DATE -> run to run.started.format(DATE)
-                COL_WHY -> run to (run.why ?: "(no why)")
-                COL_RESULT -> run to Format.result(run, state.mainMetric)
-                COL_TREND -> run.mainMetric(state.mainMetric)?.let { run.spark(it) to (run.status == "crashed") }
-                COL_VERDICT -> run.verdict
-                COL_NOTE -> run to run.conclusion.orEmpty()
+                COL_STARTED -> run to run.started.format(DATE)
+                COL_HYPOTHESIS -> run to (run.why ?: "no hypothesis")
+                COL_METRIC -> metricValue(run)
+                COL_CONCLUSION -> run
                 else -> null
             }
         }
@@ -268,7 +325,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         override fun actionPerformed(e: AnActionEvent) = service.refresh()
     }
 
-    private inner class CompareAction : RunAction("Compare", "Compare with the parent run, or compare two selected runs", AllIcons.Actions.Diff) {
+    private inner class CompareAction : RunAction("Compare", "Compare with the run it came from, or compare two selected runs", AllIcons.Actions.Diff) {
         override fun update(e: AnActionEvent) {
             e.presentation.isEnabled = table.selectedRowCount in 1..2
         }
@@ -285,7 +342,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         override fun actionPerformed(e: AnActionEvent) = annotate("verdict", verdict)
     }
 
-    private inner class EditTextAction(private val kind: String, text: String, description: String, icon: Icon) :
+    private inner class EditTextAction(private val kind: String, text: String, description: String, icon: Icon?) :
         RunAction(text, description, icon) {
         override fun update(e: AnActionEvent) {
             e.presentation.isEnabled = table.selectedRowCount == 1
@@ -293,8 +350,11 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
 
         override fun actionPerformed(e: AnActionEvent) {
             val run = selectedRuns().singleOrNull() ?: return
-            val (title, initial) = if (kind == "why") "Why did you run this?" to run.why.orEmpty() else "What did you learn?" to ""
-            askText(title, initial) { annotate(kind, it) }
+            if (kind == "why") {
+                askText("Hypothesis", "Why did you run this?", run.why.orEmpty()) { annotate(kind, it) }
+            } else {
+                askText("Conclusion", "What did this run show?", run.conclusion.orEmpty()) { annotate(kind, it) }
+            }
         }
     }
 
@@ -321,14 +381,12 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     companion object {
         private const val README = "https://github.com/sigmoid-ide/hunch#readme"
         private val DATE = DateTimeFormatter.ofPattern("MMM d HH:mm")
-        private val COLUMNS = arrayOf("", "Run", "Date", "Why", "Result", "Trend", "Verdict", "Note")
+        private val COLUMNS = arrayOf("", "Run", "Started", "Hypothesis", "Metric", "Conclusion")
         private const val COL_GRAPH = 0
         private const val COL_RUN = 1
-        private const val COL_DATE = 2
-        private const val COL_WHY = 3
-        private const val COL_RESULT = 4
-        private const val COL_TREND = 5
-        private const val COL_VERDICT = 6
-        private const val COL_NOTE = 7
+        private const val COL_STARTED = 2
+        private const val COL_HYPOTHESIS = 3
+        private const val COL_METRIC = 4
+        private const val COL_CONCLUSION = 5
     }
 }
