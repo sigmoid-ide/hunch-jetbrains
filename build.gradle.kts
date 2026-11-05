@@ -1,4 +1,5 @@
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.jetbrains.kotlin.gradle.dsl.JvmDefaultMode
 
 plugins {
     id("org.jetbrains.kotlin.jvm")
@@ -10,6 +11,11 @@ version = "0.1.0"
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        // Use the platform interfaces' own default methods instead of generating forwarding
+        // methods, which the Plugin Verifier reports as uses of deprecated and experimental API.
+        jvmDefault.set(JvmDefaultMode.NO_COMPATIBILITY)
+    }
 }
 
 dependencies {
