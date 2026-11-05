@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "com.github.sigmoidide.hunch"
-version = "0.1.0"
+version = "0.1.1"
 
 kotlin {
     jvmToolchain(21)

@@ -19,7 +19,12 @@
         Runs are plain files in <code>.hunch/</code>, and nothing leaves your machine.</p>
     ]]></description>
     <change-notes><![CDATA[
-        <p>First release:</p>
+        <p>0.1.1</p>
+        <ul>
+            <li>The Run with Hunch button now shows in the main toolbar, right after the Run widget.</li>
+            <li>Compare shows the command as you typed it, without the interpreter's full path.</li>
+        </ul>
+        <p>0.1.0, the first release:</p>
         <ul>
             <li>The Hunch tool window: the tree of runs and their details, keep, drop and conclusions.</li>
             <li>Compare runs in the diff viewer.</li>
