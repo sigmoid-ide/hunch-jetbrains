@@ -43,7 +43,8 @@
         <action id="Hunch.RunWithHunchButton" class="com.github.sigmoidide.hunch.run.RunWithHunchButton"
                 text="Run with Hunch" description="Run the selected configuration and record it with Hunch"
                 icon="/icons/runWithHunch.svg">
-            <add-to-group group-id="RunToolbarMainActionGroup" anchor="after" relative-to-action="RunToolbarTopLevelExecutorActionGroup"/>
+            <!-- Not inside the Run widget: PyCharm's Jupyter plugin replaces that group with its own button list. -->
+            <add-to-group group-id="MainToolbarRight" anchor="after" relative-to-action="NewUiRunWidget"/>
         </action>
     </actions>
 </idea-plugin>

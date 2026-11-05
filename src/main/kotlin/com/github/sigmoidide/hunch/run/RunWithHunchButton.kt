@@ -10,8 +10,8 @@ import com.intellij.openapi.project.DumbAwareAction
 import com.jetbrains.python.run.PythonRunConfiguration
 
 /**
- * Run with Hunch as a button in the Run widget, right after Run and Debug. The widget only
- * shows those two executors itself; every other one waits in its More menu.
+ * Run with Hunch as a main toolbar button, right after the Run widget. The widget itself only
+ * shows Run and Debug; every other executor waits in its More menu.
  */
 class RunWithHunchButton : DumbAwareAction() {
     override fun getActionUpdateThread() = ActionUpdateThread.BGT
