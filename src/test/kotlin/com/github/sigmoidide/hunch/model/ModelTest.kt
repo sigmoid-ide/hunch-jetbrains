@@ -179,6 +179,15 @@ class FormatTest {
     }
 
     @Test
+    fun `commands read the way you typed them, without full paths`() {
+        val root = Files.createTempDirectory("project")
+        val python = root.resolve("venv").resolve("python").toString()
+        val meta = mapOf("started_at" to "2026-11-05T10:00:00+00:00", "command" to listOf(python, root.resolve("train.py").toString(), "--lr", "3e-4"))
+        val run = Run(root.resolve("run"), meta, null, emptyList(), null, emptyList())
+        assertEquals("python train.py --lr 3e-4", Format.command(run, root))
+    }
+
+    @Test
     fun durations() {
         assertEquals("41s", Format.duration(41.2))
         assertEquals("12m 3s", Format.duration(723.0))

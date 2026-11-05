@@ -19,9 +19,7 @@ import java.awt.Dimension
 import java.awt.GridBagConstraints
 import java.awt.GridBagLayout
 import java.awt.Rectangle
-import java.nio.file.InvalidPathException
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.time.format.DateTimeFormatter
 import javax.swing.JComponent
 import javax.swing.JPanel
@@ -54,7 +52,7 @@ class DetailsPanel(private val onSelectRun: (String) -> Unit) : JPanel(BorderLay
             val parent = runs[parentId]
             page.add("Came from", ActionLink("${shortIds[parentId] ?: parentId}  ${parent?.why.orEmpty()}".trim()) { onSelectRun(parentId) })
         }
-        page.add("Command", shortCommand(run, store.root))
+        page.add("Command", Format.command(run, store.root))
         page.add("Code", code(run.dir, run.git))
         page.add("Config", config(run))
         page.add("Environment", environment(run))
@@ -134,21 +132,6 @@ class DetailsPanel(private val onSelectRun: (String) -> Unit) : JPanel(BorderLay
         }
         return state + (run.host["hostname"]?.let { " on $it" } ?: "")
     }
-
-    /** `python train.py --lr 3e-4` instead of the interpreter's full path and absolute script paths. */
-    private fun shortCommand(run: Run, root: Path): String = run.command.mapIndexed { index, part ->
-        val path = try {
-            Paths.get(part)
-        } catch (_: InvalidPathException) {
-            null
-        }
-        when {
-            path == null || !path.isAbsolute -> part
-            index == 0 -> path.fileName.toString().removeSuffix(".exe")
-            path.startsWith(root) -> root.relativize(path).toString()
-            else -> part
-        }
-    }.joinToString(" ")
 
     /** The code snapshot in `dir`, and the git commit it was on. */
     private fun code(dir: Path, git: Map<*, *>?): String {

@@ -2,9 +2,27 @@ package com.github.sigmoidide.hunch.model
 
 import java.math.BigDecimal
 import java.math.MathContext
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
+import java.nio.file.Paths
 
 /** Text formatting shared with the `hunch` command line, so both read the same. */
 object Format {
+    /** `python train.py --lr 3e-4` instead of the interpreter's full path and absolute script paths. */
+    fun command(run: Run, root: Path): String = run.command.mapIndexed { index, part ->
+        val path = try {
+            Paths.get(part)
+        } catch (_: InvalidPathException) {
+            null
+        }
+        when {
+            path == null || !path.isAbsolute -> part
+            index == 0 -> path.fileName.toString().removeSuffix(".exe")
+            path.startsWith(root) -> root.relativize(path).toString()
+            else -> part
+        }
+    }.joinToString(" ")
+
     /** The shortest unique ending of each id: 4 characters, then longer. */
     fun shortIds(ids: List<String>): Map<String, String> {
         val lengths = listOf(4, 6, 11)

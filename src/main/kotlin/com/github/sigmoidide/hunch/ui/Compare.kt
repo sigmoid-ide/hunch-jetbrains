@@ -21,6 +21,7 @@ import com.intellij.openapi.project.Project
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.nio.file.Path
 
 /**
  * Opens what changed between two runs in the platform diff viewer: their config and
@@ -33,8 +34,8 @@ object Compare {
         val service = HunchService.getInstance(project)
         service.scope.launch(Dispatchers.IO) {
             val changes = Snapshot.changes(store, before, after)
-            val summaryBefore = summary(before)
-            val summaryAfter = summary(after)
+            val summaryBefore = summary(before, store.root)
+            val summaryAfter = summary(after, store.root)
             withContext(Dispatchers.EDT) {
                 val titleBefore = "${shortIds[before.id] ?: before.id}  ${before.why.orEmpty()}".trim()
                 val titleAfter = "${shortIds[after.id] ?: after.id}  ${after.why.orEmpty()}".trim()
@@ -65,9 +66,9 @@ object Compare {
     }
 
     /** One line per setting and final metric, so the diff viewer can line them up. */
-    private fun summary(run: Run): String = buildString {
+    private fun summary(run: Run, root: Path): String = buildString {
         appendLine("# command")
-        appendLine(run.command.joinToString(" "))
+        appendLine(Format.command(run, root))
         appendLine()
         appendLine("# config")
         HunchStore.readJson(run.dir.resolve("config.json")).asMap()["values"].asMap().toSortedMap().forEach { (k, v) ->
