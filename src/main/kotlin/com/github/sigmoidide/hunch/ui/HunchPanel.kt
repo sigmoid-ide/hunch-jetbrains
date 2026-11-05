@@ -5,6 +5,7 @@ import com.github.sigmoidide.hunch.model.Run
 import com.github.sigmoidide.hunch.model.RunGraph
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
+import com.intellij.notification.NotificationType
 import com.intellij.ide.actions.RevealFileAction
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
@@ -20,16 +21,19 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
+import com.intellij.ui.CollectionListModel
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.awt.RelativePoint
+import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
@@ -39,7 +43,10 @@ import javax.swing.Icon
 import javax.swing.ListSelectionModel
 import javax.swing.table.AbstractTableModel
 
-/** The Hunch tool window: the run tree on the left, the selected run's details on the right. */
+/**
+ * The Hunch tool window: milestones on the left (once there are any), the run tree of the
+ * chosen milestone in the middle, and the selected run's or milestone's details on the right.
+ */
 class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolWindowPanel(false, true) {
     private val service = HunchService.getInstance(project)
     private val model = RunsModel()
@@ -52,12 +59,25 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     /** The metric named in the metric column's header. */
     private var headerMetric: String? = null
 
+    private val scopes = CollectionListModel<Scope>()
+    private val scopeList = JBList(scopes)
+    private val scopeScroll = ScrollPaneFactory.createScrollPane(scopeList, true)
+    private val outer = OnePixelSplitter(false, "hunch.milestones.split", 0.18f)
+    private var scope: Scope = Scope.Latest
+    private var scopeCounts: Map<String, Int> = emptyMap()
+    private var updatingScopes = false
+
+    /** Set after saving a milestone: the milestones before it, so the new one can be selected. */
+    private var selectNewMilestoneAfter: Set<String>? = null
+
     init {
         configureTable()
+        configureScopeList()
         val splitter = OnePixelSplitter(false, "hunch.details.split", 0.64f)
         splitter.firstComponent = ScrollPaneFactory.createScrollPane(table, true)
         splitter.secondComponent = details
-        setContent(splitter)
+        outer.secondComponent = splitter
+        setContent(outer)
 
         val keep = VerdictAction("keep", "Keep", "Worth building on", AllIcons.Actions.Checked)
         val drop = VerdictAction("drop", "Drop", "A dead end", AllIcons.Actions.Cancel)
@@ -66,6 +86,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             Refresh(), Separator.getInstance(),
             CompareAction(), Separator.getInstance(),
             keep, drop, conclude, Separator.getInstance(),
+            SaveMilestone(), Separator.getInstance(),
             ShowAllToggle(),
             OpenFolder(),
         )
@@ -142,6 +163,24 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         }
     }
 
+    private fun configureScopeList() {
+        scopeList.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        scopeList.cellRenderer = ScopeRenderer { scopeCounts }
+        scopeList.addListSelectionListener { e ->
+            if (e.valueIsAdjusting || updatingScopes) return@addListSelectionListener
+            val chosen = scopeList.selectedValue ?: return@addListSelectionListener
+            scope = chosen
+            table.clearSelection()
+            update(state)
+        }
+        scopeList.addMouseListener(object : MouseAdapter() {
+            override fun mouseClicked(e: MouseEvent) {
+                // Clicking the milestone already chosen brings its details back.
+                if (scope is Scope.Of) table.clearSelection()
+            }
+        })
+    }
+
     private fun fixedWidth(column: Int, width: Int) {
         val c = table.columnModel.getColumn(column)
         c.preferredWidth = JBUI.scale(width)
@@ -150,9 +189,18 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     }
 
     private fun update(newState: HunchState) {
-        val selectedIds = selectedRuns().map { it.id }.toSet()
+        var selectedIds = selectedRuns().map { it.id }.toSet()
         state = newState
-        val shown = RunGraph.visible(newState.runs, showAll)
+        selectNewMilestoneAfter?.let { before ->
+            val saved = newState.milestones.lastOrNull { it.id !in before } ?: return@let
+            // Show the milestone just saved, with its details rather than a run's.
+            selectNewMilestoneAfter = null
+            scope = Scope.Of(saved, "")
+            selectedIds = emptySet()
+        }
+        updateScopes(newState)
+        val inScope = scope.runs(newState)
+        val shown = RunGraph.visible(inScope, showAll)
         val rows = RunGraph.rows(shown)
         shortIds = Format.shortIds(newState.runs.map { it.id })
         headerMetric = newState.mainMetric
@@ -163,7 +211,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         val graphWidth = GraphCell.width(rows.maxOfOrNull { it.width } ?: 1)
         table.columnModel.getColumn(COL_GRAPH).let { it.minWidth = graphWidth; it.maxWidth = graphWidth; it.preferredWidth = graphWidth }
 
-        val hidden = newState.runs.size - shown.size
+        val hidden = inScope.size - shown.size
         val empty = table.emptyText
         empty.clear()
         when {
@@ -174,18 +222,45 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 empty.appendLine("or add hunch.init() to your training script")
                 empty.appendLine("How Hunch works", SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { BrowserUtil.browse(README) }
             }
+            inScope.isEmpty() && scope == Scope.Latest -> {
+                empty.text = "No runs since M${newState.milestones.size}"
+                empty.appendLine("Your next runs will appear here.")
+            }
+            inScope.isEmpty() -> empty.text = "This milestone covers no runs"
             else -> empty.text = "$hidden quick crash${if (hidden == 1) "" else "es"} hidden"
         }
 
         rows.forEachIndexed { index, row ->
             if (row.run.id in selectedIds) table.selectionModel.addSelectionInterval(index, index)
         }
-        if (table.selectedRowCount == 0 && rows.isNotEmpty()) table.selectionModel.setSelectionInterval(0, 0)
+        // A milestone shows its own details until a run is picked.
+        if (table.selectedRowCount == 0 && rows.isNotEmpty() && scope !is Scope.Of) table.selectionModel.setSelectionInterval(0, 0)
         showDetails()
+    }
+
+    /** Fills the milestone list, keeping the chosen entry; hides it while there are no milestones. */
+    private fun updateScopes(newState: HunchState) {
+        val all = Scope.all(newState)
+        scope = all.firstOrNull { it.key == scope.key } ?: Scope.Latest
+        scopeCounts = all.associate { s -> s.key to s.runs(newState).count { !it.trivial } }
+        updatingScopes = true
+        try {
+            scopes.replaceAll(all)
+            scopeList.setSelectedValue(scope, false)
+        } finally {
+            updatingScopes = false
+        }
+        val left = if (all.isEmpty()) null else scopeScroll
+        if (outer.firstComponent !== left) outer.firstComponent = left
     }
 
     private fun showDetails() {
         val selected = selectedRuns()
+        val chosen = scope
+        if (selected.isEmpty() && chosen is Scope.Of) {
+            details.show(chosen.milestone, chosen.number, state.runs.associateBy { it.id }, shortIds, state.store)
+            return
+        }
         when (selected.size) {
             0 -> details.showMessage(if (state.runs.isEmpty()) "Your runs will appear here." else "Select a run to see its details.")
             1 -> details.show(selected[0], state.runs.associateBy { it.id }, shortIds, state.store, headerMetric)
@@ -354,6 +429,37 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 askText("Hypothesis", "Why did you run this?", run.why.orEmpty()) { annotate(kind, it) }
             } else {
                 askText("Conclusion", "What did this run show?", run.conclusion.orEmpty()) { annotate(kind, it) }
+            }
+        }
+    }
+
+    private inner class SaveMilestone : RunAction(
+        "Save Milestone...", "Sum up the runs since the last milestone, with your title and note, and save the code", HunchIcons.MILESTONE,
+    ) {
+        override fun update(e: AnActionEvent) {
+            e.presentation.isEnabled = state.runs.isNotEmpty()
+        }
+
+        override fun actionPerformed(e: AnActionEvent) {
+            val dialog = SaveMilestoneDialog(project)
+            if (!dialog.showAndGet()) return
+            val args = buildList {
+                add("milestone")
+                // The = form and -- keep a note or title that starts with "-" from reading as an option.
+                if (dialog.note.isNotBlank()) add("--note=${dialog.note.trim()}")
+                add("--")
+                add(dialog.milestoneTitle.trim())
+            }
+            val before = state.milestones.map { it.id }.toSet()
+            val root = state.store.root
+            service.scope.launch(Dispatchers.IO) {
+                val result = HunchCli.run(project, root, args)
+                withContext(Dispatchers.EDT) {
+                    if (result.ok) selectNewMilestoneAfter = before
+                    val message = result.message.lineSequence().first().replaceFirstChar { it.uppercase() }
+                    Compare.notify(project, if (result.ok) message else result.message, if (result.ok) NotificationType.INFORMATION else NotificationType.ERROR)
+                }
+                service.refresh()
             }
         }
     }

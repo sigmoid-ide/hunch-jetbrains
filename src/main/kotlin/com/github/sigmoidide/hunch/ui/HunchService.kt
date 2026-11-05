@@ -1,6 +1,7 @@
 package com.github.sigmoidide.hunch.ui
 
 import com.github.sigmoidide.hunch.model.HunchStore
+import com.github.sigmoidide.hunch.model.Milestone
 import com.github.sigmoidide.hunch.model.Run
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
@@ -17,7 +18,13 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /** What the tool window shows: the project's runs, reloaded whenever .hunch changes. */
-data class HunchState(val store: HunchStore, val runs: List<Run>, val mainMetric: String?, val loaded: Boolean)
+data class HunchState(
+    val store: HunchStore,
+    val runs: List<Run>,
+    val milestones: List<Milestone>,
+    val mainMetric: String?,
+    val loaded: Boolean,
+)
 
 /**
  * Watches the project's .hunch folder from a background coroutine and publishes its runs.
@@ -27,7 +34,7 @@ data class HunchState(val store: HunchStore, val runs: List<Run>, val mainMetric
 @Service(Service.Level.PROJECT)
 class HunchService(private val project: Project, val scope: CoroutineScope) {
     private val root: Path = project.guessProjectDir()?.toNioPathOrNull() ?: Paths.get(project.basePath ?: ".")
-    private val _state = MutableStateFlow(HunchState(HunchStore.find(root), emptyList(), null, loaded = false))
+    private val _state = MutableStateFlow(HunchState(HunchStore.find(root), emptyList(), emptyList(), null, loaded = false))
     val state: StateFlow<HunchState> = _state
     private var signature = Long.MIN_VALUE
 
@@ -54,7 +61,7 @@ class HunchService(private val project: Project, val scope: CoroutineScope) {
         val current = store.signature()
         if (current == signature && _state.value.loaded) return
         signature = current
-        _state.value = HunchState(store, store.runs(), store.mainMetric(), loaded = true)
+        _state.value = HunchState(store, store.runs(), store.milestones(), store.mainMetric(), loaded = true)
     }
 
     private fun com.intellij.openapi.vfs.VirtualFile.toNioPathOrNull(): Path? =

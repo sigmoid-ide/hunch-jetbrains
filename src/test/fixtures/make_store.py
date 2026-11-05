@@ -3,7 +3,8 @@ tested against what hunch actually writes.
 
 Usage: python make_store.py <path to a python that has hunch installed>
 
-The runs: a baseline, a kept child with a note, a quick crash and a finished sibling.
+The runs: a baseline, a kept child with a note, a milestone covering those two, then a
+quick crash and a finished sibling.
 Machine-specific strings (user folder, host name) are scrubbed afterwards.
 """
 
@@ -56,6 +57,7 @@ with tempfile.TemporaryDirectory() as temp:
     run(project, "warmup", "0.1")
     warmup = newest(project)
     hunch(project, "note", warmup[-6:], "warmup helps, приятно", "--keep")
+    hunch(project, "milestone", "warmup beats baseline", "-m", "the spike is gone")
     run(project, "typo", "0.1", "fail", check=False)
     run(project, "higher lr", "0.3")
     sibling = newest(project)

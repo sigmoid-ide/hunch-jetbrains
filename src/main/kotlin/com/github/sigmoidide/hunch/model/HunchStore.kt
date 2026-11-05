@@ -17,6 +17,7 @@ class HunchStore(val root: Path) {
     val dir: Path = root.resolve(".hunch")
     val runsDir: Path = dir.resolve("runs")
     val objects: Path = dir.resolve("objects")
+    val milestonesDir: Path = dir.resolve("milestones")
 
     fun exists(): Boolean = runsDir.isDirectory()
 
@@ -33,6 +34,24 @@ class HunchStore(val root: Path) {
             return emptyList()
         }
         return folders.mapNotNull(::load).sortedWith(compareBy<Run> { it.started }.thenBy { it.id })
+    }
+
+    /** All milestones, oldest first, so M1 is the first. */
+    fun milestones(): List<Milestone> {
+        val folders = try {
+            milestonesDir.listDirectoryEntries().filter { it.isDirectory() }
+        } catch (_: IOException) {
+            return emptyList()
+        }
+        return folders.mapNotNull { folder ->
+            @Suppress("UNCHECKED_CAST")
+            val meta = readJson(folder.resolve("milestone.json")) as? Map<String, Any?>
+            try {
+                meta?.takeIf { it["created_at"] is String }?.let { Milestone(folder, it) }
+            } catch (_: RuntimeException) {
+                null // a milestone.json we cannot make sense of
+            }
+        }.sortedWith(compareBy<Milestone> { it.created }.thenBy { it.id })
     }
 
     /**
@@ -54,6 +73,13 @@ class HunchStore(val root: Path) {
                 hash = hash * 31 + (try { Files.size(file) } catch (_: IOException) { -1L })
             }
         }
+        // Milestones never change once written, so their names are enough.
+        val milestones = try {
+            milestonesDir.listDirectoryEntries().filter { it.resolve("milestone.json").exists() }
+        } catch (_: IOException) {
+            emptyList()
+        }
+        hash = hash * 31 + milestones.map { it.fileName.toString() }.sorted().hashCode()
         hash = hash * 31 + (try { Files.size(dir.resolve("config.json")) } catch (_: IOException) { -1L })
         // Whether a run without an end is still running depends on the clock.
         return hash * 31 + System.currentTimeMillis() / 60_000

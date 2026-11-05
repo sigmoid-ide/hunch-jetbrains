@@ -78,9 +78,9 @@ object Compare {
         run.finalMetrics.toSortedMap().forEach { (k, v) -> appendLine("$k = ${Format.value(v)}") }
     }
 
-    fun notify(project: Project, text: String) {
+    fun notify(project: Project, text: String, type: NotificationType = NotificationType.INFORMATION) {
         NotificationGroupManager.getInstance().getNotificationGroup("Hunch")
-            .createNotification(text, NotificationType.INFORMATION)
+            .createNotification(text, type)
             .notify(project)
     }
 }

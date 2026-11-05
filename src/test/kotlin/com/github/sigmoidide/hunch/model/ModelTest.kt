@@ -1,5 +1,7 @@
 package com.github.sigmoidide.hunch.model
 
+import com.github.sigmoidide.hunch.ui.HunchState
+import com.github.sigmoidide.hunch.ui.Scope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -12,7 +14,8 @@ import java.nio.file.Paths
 
 /**
  * Reads src/test/testData/store, written by the real hunch CLI (see src/test/fixtures/make_store.py):
- * baseline, then warmup (kept, with a note), then from warmup a quick crash "typo" and "higher lr".
+ * baseline, then warmup (kept, with a note), a milestone covering both, then from warmup a quick
+ * crash "typo" and "higher lr".
  */
 class ModelTest {
     private val store = HunchStore(Paths.get("src/test/testData/store"))
@@ -54,6 +57,26 @@ class ModelTest {
         val shown = RunGraph.rows(RunGraph.visible(runs, showAll = false))
         assertEquals(listOf("higher lr", "warmup", "baseline"), shown.map { it.run.why })
         assertTrue(shown.all { it.lane == 0 })
+    }
+
+    @Test
+    fun `reads milestones and splits runs by them`() {
+        val milestones = store.milestones()
+        val m = milestones.single()
+        assertEquals("warmup beats baseline", m.title)
+        assertEquals("the spike is gone", m.description)
+        assertEquals(listOf(run("baseline").id, run("warmup").id), m.runs)
+        assertEquals(run("warmup").id, m.best)
+        assertEquals("val_loss", m.metric)
+        assertTrue(m.summary.startsWith("2 runs (1 kept)"))
+
+        val state = HunchState(store, runs, milestones, null, loaded = true)
+        val scopes = Scope.all(state)
+        assertEquals(listOf("latest", m.id, "all"), scopes.map { it.key })
+        assertEquals("M1", (scopes[1] as Scope.Of).number)
+        assertEquals(listOf("typo", "higher lr"), Scope.Latest.runs(state).map { it.why })
+        assertEquals(listOf("baseline", "warmup"), scopes[1].runs(state).map { it.why })
+        assertEquals(emptyList<Scope>(), Scope.all(state.copy(milestones = emptyList())))
     }
 
     @Test

@@ -1,7 +1,7 @@
 {
   "format": 2,
-  "id": "20261105-1724-038242",
-  "started_at": "2026-11-05T17:24:14.616+05:00",
+  "id": "20261105-1849-56741c",
+  "started_at": "2026-11-05T18:49:50.497+05:00",
   "source": "wrapper",
   "command": [
     "C:/Users/user/Documents/development/kuri-studio/hunch/.venv/Scripts/python.exe",
@@ -9,9 +9,9 @@
     "0.1"
   ],
   "cwd": "C:\\work\\project",
-  "why": "baseline",
-  "parent": null,
-  "parent_source": null,
+  "why": "warmup",
+  "parent": "20261105-1849-43da3f",
+  "parent_source": "default",
   "line": null,
   "main_metric": null,
   "labels": {},

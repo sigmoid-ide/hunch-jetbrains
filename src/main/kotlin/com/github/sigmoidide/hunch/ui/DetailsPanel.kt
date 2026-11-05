@@ -2,6 +2,7 @@ package com.github.sigmoidide.hunch.ui
 
 import com.github.sigmoidide.hunch.model.Format
 import com.github.sigmoidide.hunch.model.HunchStore
+import com.github.sigmoidide.hunch.model.Milestone
 import com.github.sigmoidide.hunch.model.Run
 import com.github.sigmoidide.hunch.model.asList
 import com.github.sigmoidide.hunch.model.asMap
@@ -46,11 +47,64 @@ class DetailsPanel(private val onSelectRun: (String) -> Unit) : JPanel(BorderLay
     }
 
     fun show(run: Run, runs: Map<String, Run>, shortIds: Map<String, String>, store: HunchStore, mainMetric: String?) {
-        val panel = WidthTrackingPanel()
-        panel.border = JBUI.Borders.empty(10, 12)
-        val grid = GridBag()
+        val page = Page(run.why ?: "No hypothesis", dimTitle = run.why == null, "${shortIds[run.id] ?: run.id}  ·  started ${run.started.format(DATE)}")
+        page.add("Status", status(run))
+        page.add("Conclusion", listOfNotNull(run.verdict, run.conclusion).joinToString(": "))
+        run.parent?.let { parentId ->
+            val parent = runs[parentId]
+            page.add("Came from", ActionLink("${shortIds[parentId] ?: parentId}  ${parent?.why.orEmpty()}".trim()) { onSelectRun(parentId) })
+        }
+        page.add("Command", shortCommand(run, store.root))
+        page.add("Code", code(run.dir, run.git))
+        page.add("Config", config(run))
+        page.add("Environment", environment(run))
+        page.add("GPU", gpus(run))
+        val key = run.mainMetric(mainMetric)
+        page.add("Metrics", run.metricKeys.sortedBy { if (it == key) 0 else 1 }
+            .joinToString("\n") { "$it  ${Format.value(run.finalMetrics[it])}" })
+        page.add("History", run.notes.joinToString("\n") { event ->
+            val kind = when (event["kind"]) {
+                "why" -> "hypothesis"
+                "note" -> "conclusion"
+                else -> event["kind"].toString()
+            }
+            "${event["at"].toString().take(16).replace('T', ' ')}  $kind: ${event["value"]}"
+        })
+        page.add("Folder", ActionLink(store.root.relativize(run.dir).toString()) { RevealFileAction.openDirectory(run.dir) })
+        scroll.setViewportView(page.finish())
+    }
+
+    /** A milestone, like `hunch show M1`. */
+    fun show(milestone: Milestone, number: String, runs: Map<String, Run>, shortIds: Map<String, String>, store: HunchStore) {
+        val saved = "$number  ·  saved ${milestone.created.format(DATE)}" + (milestone.line?.let { " on $it" } ?: "")
+        val page = Page(milestone.title.ifEmpty { "Untitled milestone" }, dimTitle = milestone.title.isEmpty(), saved)
+        page.add("Note", milestone.description)
+        page.add("Summary", milestone.summary)
+        milestone.best?.let { bestId ->
+            val best = runs[bestId] ?: return@let
+            val value = milestone.metric?.let { metric -> best.finalMetrics[metric]?.let { "  $metric ${Format.value(it)}" } }.orEmpty()
+            page.add("Best run", ActionLink("${shortIds[bestId] ?: bestId}  ${best.why.orEmpty()}$value".trim()) { onSelectRun(bestId) })
+        }
+        page.add("Code", code(milestone.dir, milestone.meta["git"] as? Map<*, *>))
+        page.add("Folder", ActionLink(store.root.relativize(milestone.dir).toString()) { RevealFileAction.openDirectory(milestone.dir) })
+        scroll.setViewportView(page.finish())
+    }
+
+    /** A title, a dim line under it, then label and value rows. */
+    private inner class Page(title: String, dimTitle: Boolean, subtitle: String) {
+        private val panel = WidthTrackingPanel()
+        private val grid = GridBag()
             .setDefaultAnchor(GridBagConstraints.NORTHWEST)
             .setDefaultInsets(JBUI.insets(3, 0, 3, 14))
+
+        init {
+            panel.border = JBUI.Borders.empty(10, 12)
+            val heading = text(title)
+            heading.font = JBUI.Fonts.label().biggerOn(2f).asBold()
+            if (dimTitle) heading.foreground = UIUtil.getContextHelpForeground()
+            panel.add(heading, grid.nextLine().next().coverLine().weightx(1.0).fillCellHorizontally().insets(0, 0, 2, 0))
+            panel.add(dim(subtitle), grid.nextLine().next().coverLine().insets(0, 0, 10, 0))
+        }
 
         fun add(label: String, component: JComponent) {
             panel.add(dim(label), grid.nextLine().next())
@@ -61,39 +115,11 @@ class DetailsPanel(private val onSelectRun: (String) -> Unit) : JPanel(BorderLay
             if (!value.isNullOrBlank()) add(label, text(value))
         }
 
-        val title = text(run.why ?: "No hypothesis")
-        title.font = JBUI.Fonts.label().biggerOn(2f).asBold()
-        if (run.why == null) title.foreground = UIUtil.getContextHelpForeground()
-        panel.add(title, grid.nextLine().next().coverLine().weightx(1.0).fillCellHorizontally().insets(0, 0, 2, 0))
-        panel.add(dim("${shortIds[run.id] ?: run.id}  ·  started ${run.started.format(DATE)}"), grid.nextLine().next().coverLine().insets(0, 0, 10, 0))
-
-        add("Status", status(run))
-        add("Conclusion", listOfNotNull(run.verdict, run.conclusion).joinToString(": "))
-        run.parent?.let { parentId ->
-            val parent = runs[parentId]
-            add("Came from", ActionLink("${shortIds[parentId] ?: parentId}  ${parent?.why.orEmpty()}".trim()) { onSelectRun(parentId) })
+        fun finish(): JComponent {
+            // Pushes the rows to the top.
+            panel.add(JPanel().apply { isOpaque = false }, grid.nextLine().next().coverLine().weighty(1.0))
+            return panel
         }
-        add("Command", shortCommand(run, store.root))
-        add("Code", code(run))
-        add("Config", config(run))
-        add("Environment", environment(run))
-        add("GPU", gpus(run))
-        val key = run.mainMetric(mainMetric)
-        add("Metrics", run.metricKeys.sortedBy { if (it == key) 0 else 1 }
-            .joinToString("\n") { "$it  ${Format.value(run.finalMetrics[it])}" })
-        add("History", run.notes.joinToString("\n") { event ->
-            val kind = when (event["kind"]) {
-                "why" -> "hypothesis"
-                "note" -> "conclusion"
-                else -> event["kind"].toString()
-            }
-            "${event["at"].toString().take(16).replace('T', ' ')}  $kind: ${event["value"]}"
-        })
-        add("Folder", ActionLink(store.root.relativize(run.dir).toString()) { RevealFileAction.openDirectory(run.dir) })
-
-        // Pushes the rows to the top.
-        panel.add(JPanel().apply { isOpaque = false }, grid.nextLine().next().coverLine().weighty(1.0))
-        scroll.setViewportView(panel)
     }
 
     private fun status(run: Run): String {
@@ -124,11 +150,12 @@ class DetailsPanel(private val onSelectRun: (String) -> Unit) : JPanel(BorderLay
         }
     }.joinToString(" ")
 
-    private fun code(run: Run): String {
-        val manifest = HunchStore.readJson(run.dir.resolve("files.json")).asMap()
+    /** The code snapshot in `dir`, and the git commit it was on. */
+    private fun code(dir: Path, git: Map<*, *>?): String {
+        val manifest = HunchStore.readJson(dir.resolve("files.json")).asMap()
         val files = manifest["files"].asMap()
         val text = if (manifest.isEmpty()) "not saved (recorded before Hunch 0.2)" else "${files.size} file${if (files.size == 1) "" else "s"} saved"
-        val git = run.git ?: return text
+        git ?: return text
         val commit = (git["commit"] as? String)?.take(9) ?: "no commits yet"
         val dirty = if (git["dirty"] == true) ", with uncommitted changes" else ""
         return "$text\ngit $commit on ${git["branch"] ?: "detached HEAD"}$dirty"
