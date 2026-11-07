@@ -52,6 +52,8 @@
                 icon="/icons/runWithHunch.svg">
             <!-- Not inside the Run widget: PyCharm's Jupyter plugin replaces that group with its own button list. -->
             <add-to-group group-id="MainToolbarRight" anchor="after" relative-to-action="NewUiRunWidget"/>
+            <!-- Free in every keymap PyCharm ships; Ctrl+Alt+H is its Call Hierarchy. -->
+            <keyboard-shortcut keymap="$default" first-keystroke="alt shift H"/>
         </action>
     </actions>
 </idea-plugin>

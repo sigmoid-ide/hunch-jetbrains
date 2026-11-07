@@ -12,6 +12,7 @@ import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.ActionManager
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CustomShortcutSet
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.IdeActions
 import com.intellij.openapi.actionSystem.Separator
@@ -43,6 +44,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.Point
+import java.awt.event.ActionEvent
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
@@ -50,7 +53,10 @@ import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
 import java.io.IOException
 import java.time.format.DateTimeFormatter
+import javax.swing.AbstractAction
 import javax.swing.Icon
+import javax.swing.JComponent
+import javax.swing.KeyStroke
 import javax.swing.JPanel
 import javax.swing.ListSelectionModel
 import javax.swing.event.DocumentEvent
@@ -129,25 +135,30 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         outer.secondComponent = splitter
         setContent(outer)
 
+        val compare = CompareAction()
         val keep = VerdictAction("keep", "Keep", "Worth building on", AllIcons.Actions.Checked)
         val drop = VerdictAction("drop", "Drop", "A dead end", AllIcons.Actions.Cancel)
         val conclude = EditTextAction("note", "Write Conclusion...", "What did this run show?", AllIcons.Actions.Edit)
+        val editWhy = EditTextAction("why", "Edit Hypothesis...", "Why you ran it", null)
+        val saveMilestone = SaveMilestone()
+        configureKeys(compare, keep, drop, conclude, editWhy)
         val toolbarActions = DefaultActionGroup(
             Refresh(), Separator.getInstance(),
-            CompareAction(), Separator.getInstance(),
+            compare, Separator.getInstance(),
             keep, drop, conclude, Separator.getInstance(),
-            SaveMilestone(), Separator.getInstance(),
+            saveMilestone, Separator.getInstance(),
             OpenFolder(),
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("HunchToolbar", toolbarActions, false)
         toolbar.targetComponent = table
         setToolbar(toolbar.component)
 
+        // Everything the toolbar and the column header do, also here, so Shift+F10 reaches it from the keyboard.
         val menu = DefaultActionGroup(
-            CompareAction(), Separator.getInstance(),
-            keep, drop, conclude,
-            EditTextAction("why", "Edit Hypothesis...", "Why you ran it", null), Separator.getInstance(),
-            OpenFolder(),
+            compare, Separator.getInstance(),
+            keep, drop, conclude, editWhy, Separator.getInstance(),
+            OpenFolder(), Separator.getInstance(),
+            saveMilestone, ChooseMetric(),
         )
         PopupHandler.installPopupMenu(table, menu, "HunchPopup")
 
@@ -205,10 +216,33 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             }
         })
 
-        ActionManager.getInstance().getAction(IdeActions.ACTION_SHOW_DIFF_COMMON)?.shortcutSet?.let { shortcuts ->
+    }
+
+    /**
+     * Keys for what is done most, while the table has the focus: K, D and C keep, drop and conclude the
+     * selected runs, the Rename shortcut edits the hypothesis, Enter and the Compare shortcut compare, and
+     * the Find shortcut goes to the search field. Shortcuts from the keymap follow the user's own keymap.
+     */
+    private fun configureKeys(compare: RunAction, keep: RunAction, drop: RunAction, conclude: RunAction, editWhy: RunAction) {
+        val actions = ActionManager.getInstance()
+        fun key(code: Int) = CustomShortcutSet(KeyStroke.getKeyStroke(code, 0))
+        keep.registerCustomShortcutSet(key(KeyEvent.VK_K), table)
+        drop.registerCustomShortcutSet(key(KeyEvent.VK_D), table)
+        conclude.registerCustomShortcutSet(key(KeyEvent.VK_C), table)
+        actions.getAction(IdeActions.ACTION_RENAME)?.shortcutSet?.let { editWhy.registerCustomShortcutSet(it, table) }
+        actions.getAction(IdeActions.ACTION_SHOW_DIFF_COMMON)?.shortcutSet?.let { compare.registerCustomShortcutSet(it, table) }
+        // Enter compares, as a double-click does, instead of moving to the next row.
+        table.getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "hunch.compare")
+        table.actionMap.put("hunch.compare", object : AbstractAction() {
+            override fun actionPerformed(e: ActionEvent) = compareSelected()
+        })
+        actions.getAction(IdeActions.ACTION_FIND)?.shortcutSet?.let { find ->
             object : DumbAwareAction() {
-                override fun actionPerformed(e: AnActionEvent) = compareSelected()
-            }.registerCustomShortcutSet(shortcuts, table)
+                override fun actionPerformed(e: AnActionEvent) {
+                    searchField.textEditor.requestFocusInWindow()
+                    searchField.textEditor.selectAll()
+                }
+            }.registerCustomShortcutSet(find, this)
         }
     }
 
@@ -516,6 +550,15 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             } else {
                 askText("Conclusion", "What did this run show?", run.conclusion.orEmpty()) { annotate(kind, it) }
             }
+        }
+    }
+
+    /** What clicking the metric column's header does, for the keyboard. */
+    private inner class ChooseMetric : RunAction("Choose Metric Column...", "The metric the table shows for each run", null) {
+        override fun actionPerformed(e: AnActionEvent) {
+            val header = table.tableHeader
+            val cell = header.getHeaderRect(COL_METRIC)
+            chooseMetric(RelativePoint(header, Point(cell.x, cell.y + cell.height)))
         }
     }
 

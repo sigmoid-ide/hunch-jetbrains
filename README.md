@@ -56,4 +56,20 @@ or pick common ones from the filter button in the tool window's toolbar:
 A run must match every word and filter. `-` turns one around (`-is:dropped`), and commas mean either
 (`is:crashed,stopped`).
 
+## Keyboard
+
+Alt+Shift+H runs the selected Python configuration with Hunch, asking why first, wherever you are in PyCharm.
+
+In the runs table:
+
+| Key | Does |
+|---|---|
+| Up, Down; with Shift | move between runs; select several |
+| Enter or Ctrl+D | compare the run with the one it came from, or the two selected runs |
+| K, D | keep or drop the selected runs |
+| C | write a conclusion |
+| Shift+F6 (your Rename shortcut) | edit the hypothesis |
+| Ctrl+F (your Find shortcut) | go to the search field; Down comes back to the table |
+| Shift+F10 | everything else: open the run's folder, save a milestone, choose the metric column |
+
 <p align="center">Apache-2.0 · Part of Sigmoid IDE · Like it? Give it a star.</p>
