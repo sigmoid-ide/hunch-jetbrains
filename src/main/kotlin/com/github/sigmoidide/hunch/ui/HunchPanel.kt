@@ -3,6 +3,7 @@ package com.github.sigmoidide.hunch.ui
 import com.github.sigmoidide.hunch.model.Format
 import com.github.sigmoidide.hunch.model.Run
 import com.github.sigmoidide.hunch.model.RunGraph
+import com.github.sigmoidide.hunch.model.Search
 import com.intellij.icons.AllIcons
 import com.intellij.ide.BrowserUtil
 import com.intellij.notification.NotificationType
@@ -22,10 +23,12 @@ import com.intellij.openapi.ui.SimpleToolWindowPanel
 import com.intellij.openapi.ui.popup.JBPopupFactory
 import com.intellij.openapi.util.Disposer
 import com.intellij.ui.CollectionListModel
+import com.intellij.ui.DocumentAdapter
 import com.intellij.ui.JBColor
 import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.ScrollPaneFactory
+import com.intellij.ui.SearchTextField
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.awt.RelativePoint
 import com.intellij.ui.components.ActionLink
@@ -40,6 +43,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.event.KeyAdapter
+import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.event.MouseMotionAdapter
@@ -48,6 +53,7 @@ import java.time.format.DateTimeFormatter
 import javax.swing.Icon
 import javax.swing.JPanel
 import javax.swing.ListSelectionModel
+import javax.swing.event.DocumentEvent
 import javax.swing.table.AbstractTableModel
 
 /**
@@ -74,6 +80,10 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     private var scopeCounts: Map<String, Int> = emptyMap()
     private var updatingScopes = false
 
+    /** Above the table: words to find in a run. While there are any, the table shows matches from all runs. */
+    private val searchField = SearchTextField(false)
+    private val searching: Boolean get() = Search.words(searchField.text).isNotEmpty()
+
     /** Under the table: how many quick runs are hidden, so a run never just disappears. */
     private val quickRunsBar = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0))
     private val quickRunsNote = JBLabel()
@@ -88,12 +98,14 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     init {
         configureTable()
         configureScopeList()
+        configureSearch()
         val splitter = OnePixelSplitter(false, "hunch.details.split", 0.64f)
         quickRunsBar.add(quickRunsNote)
         quickRunsBar.add(quickRunsLink)
         quickRunsBar.border = JBUI.Borders.compound(JBUI.Borders.customLineTop(JBColor.border()), JBUI.Borders.empty(3, 6))
         quickRunsNote.foreground = UIUtil.getContextHelpForeground()
         splitter.firstComponent = JPanel(BorderLayout()).apply {
+            add(searchField, BorderLayout.NORTH)
             add(ScrollPaneFactory.createScrollPane(table, true), BorderLayout.CENTER)
             add(quickRunsBar, BorderLayout.SOUTH)
         }
@@ -193,12 +205,30 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             val chosen = scopeList.selectedValue ?: return@addListSelectionListener
             scope = chosen
             table.clearSelection()
-            update(state)
+            // Choosing a milestone ends a search, so the table shows that milestone.
+            if (searchField.text.isNotEmpty()) searchField.text = "" else update(state)
         }
         scopeList.addMouseListener(object : MouseAdapter() {
             override fun mouseClicked(e: MouseEvent) {
                 // Clicking the milestone already chosen brings its details back.
                 if (scope is Scope.Of) table.clearSelection()
+            }
+        })
+    }
+
+    private fun configureSearch() {
+        searchField.textEditor.emptyText.text = "Search all runs"
+        searchField.border = JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(3, 6))
+        searchField.addDocumentListener(object : DocumentAdapter() {
+            override fun textChanged(e: DocumentEvent) = update(state)
+        })
+        // Down moves from the search to the first match.
+        searchField.textEditor.addKeyListener(object : KeyAdapter() {
+            override fun keyPressed(e: KeyEvent) {
+                if (e.keyCode != KeyEvent.VK_DOWN || model.rowCount == 0) return
+                e.consume()
+                table.requestFocusInWindow()
+                table.selectionModel.setSelectionInterval(0, 0)
             }
         })
     }
@@ -221,7 +251,8 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             selectedIds = emptySet()
         }
         updateScopes(newState)
-        val inScope = scope.runs(newState)
+        val words = Search.words(searchField.text)
+        val inScope = if (words.isEmpty()) scope.runs(newState) else newState.runs.filter { Search.matches(it, words, newState.store.root) }
         val shown = RunGraph.visible(inScope, showAll)
         val rows = RunGraph.rows(shown)
         shortIds = Format.shortIds(newState.runs.map { it.id })
@@ -243,6 +274,10 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 empty.appendLine("Record one with: hunch run -m \"your hypothesis\" -- python train.py")
                 empty.appendLine("or add hunch.init() to your training script")
                 empty.appendLine("How Hunch works", SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { BrowserUtil.browse(README) }
+            }
+            words.isNotEmpty() && inScope.isEmpty() -> {
+                empty.text = "No runs match \"${searchField.text.trim()}\""
+                empty.appendLine("Search looks at hypotheses, conclusions, commands, config and run ids.")
             }
             inScope.isEmpty() && scope == Scope.Latest -> {
                 empty.text = "No runs since M${newState.milestones.size}"
@@ -266,7 +301,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             if (row.run.id in selectedIds) table.selectionModel.addSelectionInterval(index, index)
         }
         // A milestone shows its own details until a run is picked.
-        if (table.selectedRowCount == 0 && rows.isNotEmpty() && scope !is Scope.Of) table.selectionModel.setSelectionInterval(0, 0)
+        if (table.selectedRowCount == 0 && rows.isNotEmpty() && (scope !is Scope.Of || words.isNotEmpty())) table.selectionModel.setSelectionInterval(0, 0)
         showDetails()
     }
 
@@ -278,7 +313,8 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         updatingScopes = true
         try {
             scopes.replaceAll(all)
-            scopeList.setSelectedValue(scope, false)
+            // While searching, no milestone is chosen: the search looks through all runs.
+            if (searching) scopeList.clearSelection() else scopeList.setSelectedValue(scope, false)
         } finally {
             updatingScopes = false
         }
@@ -289,7 +325,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     private fun showDetails() {
         val selected = selectedRuns()
         val chosen = scope
-        if (selected.isEmpty() && chosen is Scope.Of) {
+        if (selected.isEmpty() && chosen is Scope.Of && !searching) {
             details.show(chosen.milestone, chosen.number, state.runs.associateBy { it.id }, shortIds, state.store)
             return
         }
@@ -304,6 +340,8 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     private fun selectedRuns(): List<Run> = table.selectedRows.toList().mapNotNull { model.rows.getOrNull(it)?.run }
 
     private fun select(runId: String) {
+        // A run the search leaves out (such as a parent) ends the search, so it shows.
+        if (searching && model.rows.none { it.run.id == runId }) searchField.text = ""
         val index = model.rows.indexOfFirst { it.run.id == runId }
         if (index < 0) return
         table.selectionModel.setSelectionInterval(index, index)

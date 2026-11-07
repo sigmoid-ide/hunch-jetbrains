@@ -21,6 +21,7 @@ and what it showed. Any two runs compare in the diff viewer.
 </p>
 
 - **The tree of runs**, with each run's hypothesis, main metric and its curve, and your conclusion. It updates while runs train.
+- **Search** all your runs by hypothesis, conclusion, command, config or run id.
 - **Run with Hunch**: one click next to the Run widget runs any Python configuration under Hunch, asking why first.
 - **Keep or drop** a run, write its conclusion, or fix its hypothesis, right from the table.
 - **Compare** two runs, or a run with the one it came from (Ctrl+D): config, metrics and every changed code file.

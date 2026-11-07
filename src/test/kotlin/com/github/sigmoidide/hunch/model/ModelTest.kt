@@ -145,6 +145,20 @@ class ModelTest {
         assertTrue(" on gpu-box" in Format.result(remote, null))
     }
 
+    @Test
+    fun `search finds runs by hypothesis, conclusion, verdict, status, command, config and id, every word`() {
+        fun found(query: String) = runs.filter { Search.matches(it, Search.words(query), store.root) }.map { it.why }
+        assertEquals(listOf("higher", "lr"), Search.words("  Higher   LR "))
+        assertEquals(listOf("higher lr"), found("HIGHER"))
+        assertEquals(listOf("warmup"), found("приятно")) // its conclusion
+        assertEquals(listOf("warmup"), found("keep"))
+        assertEquals(listOf("typo"), found("crashed"))
+        assertEquals(listOf("typo"), found("train.py fail")) // its command
+        assertEquals(listOf("higher lr"), found("lr = 0.3")) // its config
+        assertEquals(listOf("baseline"), found(run("baseline").id.takeLast(4)))
+        assertEquals(emptyList<String?>(), found("warmup baseline"))
+    }
+
     private fun copyTree(from: Path, to: Path) {
         Files.walk(from).use { paths ->
             paths.forEach { source ->

@@ -8,6 +8,7 @@
         <ul>
             <li><b>The tree of runs</b>, with each run's hypothesis, main metric and its curve, and your conclusion.
             It updates while runs train.</li>
+            <li><b>Search</b> all your runs by hypothesis, conclusion, command, config or run id.</li>
             <li><b>Run with Hunch</b>: start any Python run configuration under Hunch, with a hypothesis.</li>
             <li><b>Keep or drop</b> a run and write its conclusion, right from the table.</li>
             <li><b>Compare</b> two runs, or a run with the one it came from, in the diff viewer:
