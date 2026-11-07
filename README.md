@@ -7,6 +7,7 @@
 **Every hunch, tracked. Now in your IDE.**
 
 <a href="https://github.com/sigmoid-ide/hunch-jetbrains/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/sigmoid-ide/hunch-jetbrains/ci.yml?branch=main&style=for-the-badge&label=ci" alt="CI status" /></a>
+<a href="https://plugins.jetbrains.com/plugin/35831-hunch"><img src="https://img.shields.io/badge/JetBrains-Marketplace-6E56CF?style=for-the-badge" alt="On JetBrains Marketplace" /></a>
 <img src="https://img.shields.io/badge/PyCharm-2026.1%2B-6E56CF?style=for-the-badge&logo=pycharm&logoColor=white" alt="PyCharm 2026.1 or newer" />
 <a href="https://github.com/sigmoid-ide/hunch-jetbrains/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6E56CF?style=for-the-badge" alt="License: Apache-2.0" /></a>
 
@@ -28,9 +29,10 @@ and what it showed. Any two runs compare in the diff viewer.
 ## Install
 
 1. Install Hunch in your project's interpreter: `pip install sigmoid-hunch`
-2. Download the plugin zip from the [latest release](https://github.com/sigmoid-ide/hunch-jetbrains/releases/latest).
-3. In PyCharm, open **Settings | Plugins | ⚙ | Install Plugin from Disk...** and pick the zip.
+2. In PyCharm, open **Settings | Plugins | Marketplace**, search for **Hunch** and click **Install**, or get it from
+   [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/35831-hunch).
 
-Hunch is in review on JetBrains Marketplace. Once it is listed, you can install it from **Settings | Plugins** instead.
+Every [release](https://github.com/sigmoid-ide/hunch-jetbrains/releases/latest) also has the plugin zip, for
+**Settings | Plugins | ⚙ | Install Plugin from Disk...**.
 
 <p align="center">Apache-2.0 · Part of Sigmoid IDE · Like it? Give it a star.</p>
