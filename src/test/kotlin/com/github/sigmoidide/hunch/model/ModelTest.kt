@@ -123,6 +123,28 @@ class ModelTest {
         assertNotNull(store.signature())
     }
 
+    @Test
+    fun `a run Ferry copies from another machine stays running while this computer sleeps`() {
+        val copy = Files.createTempDirectory("hunch-store")
+        copyTree(store.root, copy)
+        val copied = HunchStore(copy)
+        val folder = copied.runs().single { it.why == "higher lr" }.dir
+        Files.delete(folder.resolve("end.json"))
+        val heartbeat = folder.resolve("heartbeat")
+        if (!Files.exists(heartbeat)) Files.createFile(heartbeat)
+        Files.setLastModifiedTime(heartbeat, java.nio.file.attribute.FileTime.fromMillis(System.currentTimeMillis() - 3 * 3_600_000))
+        fun reread() = copied.runs().single { it.why == "higher lr" }
+        assertEquals("lost", reread().status)
+
+        Files.writeString(folder.resolve("remote.json"), """{"machine": "gpu-box", "dir": "/home/me/.ferry/x", "synced_at": "2026-11-07T09:00:00+05:00"}""")
+        val remote = reread()
+        assertEquals("running", remote.status)
+        assertEquals("gpu-box", remote.remote?.machine)
+        assertEquals(java.time.OffsetDateTime.parse("2026-11-07T09:00:00+05:00"), remote.remote?.syncedAt)
+        assertTrue(Format.result(remote, null).startsWith("running ")) // then the live metric, as in hunch log
+        assertTrue(" on gpu-box" in Format.result(remote, null))
+    }
+
     private fun copyTree(from: Path, to: Path) {
         Files.walk(from).use { paths ->
             paths.forEach { source ->

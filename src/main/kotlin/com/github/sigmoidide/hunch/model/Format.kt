@@ -75,7 +75,8 @@ object Format {
         val state = when (run.status) {
             "finished" -> return metric
             "crashed" -> run.exitCode?.let { "crashed, exit $it" } ?: "crashed"
-            "running" -> "running ${duration((System.currentTimeMillis() / 1000.0) - run.started.toEpochSecond())}"
+            "running" -> "running ${duration((System.currentTimeMillis() / 1000.0) - run.started.toEpochSecond())}" +
+                (run.remote?.let { " on ${it.machine}" } ?: "")
             else -> run.status
         }
         return if (metric.isEmpty()) state else "$state; $metric"

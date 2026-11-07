@@ -125,6 +125,12 @@ class HunchStore(val root: Path) {
                 notes = readJsonLines(folder.resolve("notes.jsonl")),
                 heartbeatAge = heartbeatAge,
                 liveRows = if (end == null) readJsonLines(folder.resolve("metrics.jsonl")) else emptyList(),
+                remote = (readJson(folder.resolve("remote.json")) as? Map<*, *>)?.let { remote ->
+                    Remote(
+                        machine = remote["machine"] as? String ?: "another machine",
+                        syncedAt = (remote["synced_at"] as? String)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
+                    )
+                },
             )
         } catch (_: RuntimeException) {
             null // a run.json we cannot make sense of

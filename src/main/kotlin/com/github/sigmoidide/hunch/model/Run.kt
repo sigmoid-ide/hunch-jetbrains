@@ -3,6 +3,9 @@ package com.github.sigmoidide.hunch.model
 import java.nio.file.Path
 import java.time.OffsetDateTime
 
+/** Where a run that Ferry copies home from another machine ran (remote.json, which only this computer has). */
+data class Remote(val machine: String, val syncedAt: OffsetDateTime?)
+
 /**
  * One run folder, read back. Mirrors hunch's RunRecord (store.py), following the
  * on-disk format in hunch's docs/format.md.
@@ -16,13 +19,16 @@ class Run(
     private val heartbeatAge: Double?,
     /** metrics.jsonl rows; only read for runs still in progress. */
     private val liveRows: List<Map<String, Any?>>,
+    val remote: Remote? = null,
 ) {
     val id: String = dir.fileName.toString()
     val started: OffsetDateTime = OffsetDateTime.parse(meta["started_at"] as String)
 
     val status: String
         get() = end?.get("status") as? String
-            ?: if ((heartbeatAge ?: Double.MAX_VALUE) < LOST_AFTER_SECONDS) "running" else "lost"
+            // Ferry is copying it from another machine: this computer may have slept, so its heartbeat says nothing about the run there.
+            ?: if (remote != null) "running"
+            else if ((heartbeatAge ?: Double.MAX_VALUE) < LOST_AFTER_SECONDS) "running" else "lost"
 
     val duration: Double?
         get() = end?.get("duration").asDouble()

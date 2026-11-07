@@ -47,6 +47,7 @@ class DetailsPanel(private val onSelectRun: (String) -> Unit) : JPanel(BorderLay
     fun show(run: Run, runs: Map<String, Run>, shortIds: Map<String, String>, store: HunchStore, mainMetric: String?) {
         val page = Page(run.why ?: "No hypothesis", dimTitle = run.why == null, "${shortIds[run.id] ?: run.id}  ·  started ${run.started.format(DATE)}")
         page.add("Status", status(run))
+        run.remote?.let { page.add("Remote", "ran on ${it.machine}, copied home by Ferry (last copy ${it.syncedAt?.format(DATE) ?: "not yet"})") }
         page.add("Conclusion", listOfNotNull(run.verdict, run.conclusion).joinToString(": "))
         run.parent?.let { parentId ->
             val parent = runs[parentId]

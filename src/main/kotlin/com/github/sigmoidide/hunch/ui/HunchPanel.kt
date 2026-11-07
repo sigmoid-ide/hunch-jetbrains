@@ -390,7 +390,8 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             "finished" -> value?.let { label + Format.value(it) } ?: ""
             "crashed" -> run.exitCode?.let { "crashed, exit $it" } ?: "crashed"
             "killed" -> "stopped"
-            "running" -> "running " + Format.duration(System.currentTimeMillis() / 1000.0 - run.started.toEpochSecond())
+            "running" -> "running " + Format.duration(System.currentTimeMillis() / 1000.0 - run.started.toEpochSecond()) +
+                (run.remote?.let { " on ${it.machine}" } ?: "")
             else -> run.status
         }
         return MetricValue(text, key?.let(run::spark).orEmpty(), run.status)
