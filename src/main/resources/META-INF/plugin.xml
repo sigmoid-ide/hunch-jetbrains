@@ -21,6 +21,16 @@
         Runs are plain files in <code>.hunch/</code>, and nothing leaves your machine.</p>
     ]]></description>
     <change-notes><![CDATA[
+        <p>0.2.0</p>
+        <ul>
+            <li>Search all your runs from the field above the table, by hypothesis, conclusion, command, config or run id,
+                and filter them: <code>is:unreviewed</code>, <code>since:7d</code>, <code>val_loss&lt;0.3</code>, <code>lr=3e-4</code>,
+                <code>from:a7f3</code> and more, or pick common filters from the toolbar.</li>
+            <li>Keys: Alt+Shift+H runs the selected configuration with Hunch; in the runs table, K and D keep and drop,
+                C writes a conclusion, Shift+F6 edits the hypothesis, Enter compares and Ctrl+F goes to the search field.</li>
+            <li>A run <a href="https://github.com/sigmoid-ide/ferry">Ferry</a> runs on another machine shows as running,
+                with the machine's name, even while your computer sleeps; its details say when Ferry last copied it home.</li>
+        </ul>
         <p>0.1.1</p>
         <ul>
             <li>The Run with Hunch button now shows in the main toolbar, right after the Run widget.</li>
