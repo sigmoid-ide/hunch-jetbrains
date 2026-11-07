@@ -80,9 +80,9 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     private var scopeCounts: Map<String, Int> = emptyMap()
     private var updatingScopes = false
 
-    /** Above the table: words to find in a run. While there are any, the table shows matches from all runs. */
+    /** Above the table: words and filters to find runs by. While there are any, the table shows matches from all runs. */
     private val searchField = SearchTextField(false)
-    private val searching: Boolean get() = Search.words(searchField.text).isNotEmpty()
+    private val searching: Boolean get() = searchField.text.isNotBlank()
 
     /** Under the table: how many quick runs are hidden, so a run never just disappears. */
     private val quickRunsBar = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(8), 0))
@@ -104,8 +104,24 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
         quickRunsBar.add(quickRunsLink)
         quickRunsBar.border = JBUI.Borders.compound(JBUI.Borders.customLineTop(JBColor.border()), JBUI.Borders.empty(3, 6))
         quickRunsNote.foreground = UIUtil.getContextHelpForeground()
+        // The common filters, ticked in the search field's text so it stays the one place that says what is shown.
+        // The button sits beside the field: the toolbar on the left runs out of room when the tool window is short.
+        val filters = DefaultActionGroup("Filter Runs", true).apply {
+            templatePresentation.icon = AllIcons.General.Filter
+            templatePresentation.description = "Show only some runs; filters go in the search field, where you can also type others"
+            Search.MENU.forEach { add(FilterToggle(it)) }
+            addSeparator()
+            add(ShowAllToggle())
+        }
+        val filterToolbar = ActionManager.getInstance().createActionToolbar("HunchSearchToolbar", DefaultActionGroup(filters), true)
+        filterToolbar.targetComponent = table
+        val searchBar = JPanel(BorderLayout()).apply {
+            add(searchField, BorderLayout.CENTER)
+            add(filterToolbar.component, BorderLayout.EAST)
+            border = JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(3, 6, 3, 0))
+        }
         splitter.firstComponent = JPanel(BorderLayout()).apply {
-            add(searchField, BorderLayout.NORTH)
+            add(searchBar, BorderLayout.NORTH)
             add(ScrollPaneFactory.createScrollPane(table, true), BorderLayout.CENTER)
             add(quickRunsBar, BorderLayout.SOUTH)
         }
@@ -121,7 +137,6 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             CompareAction(), Separator.getInstance(),
             keep, drop, conclude, Separator.getInstance(),
             SaveMilestone(), Separator.getInstance(),
-            ShowAllToggle(),
             OpenFolder(),
         )
         val toolbar = ActionManager.getInstance().createActionToolbar("HunchToolbar", toolbarActions, false)
@@ -217,8 +232,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
     }
 
     private fun configureSearch() {
-        searchField.textEditor.emptyText.text = "Search all runs"
-        searchField.border = JBUI.Borders.compound(JBUI.Borders.customLineBottom(JBColor.border()), JBUI.Borders.empty(3, 6))
+        searchField.textEditor.emptyText.text = "Search all runs, or filter: is:kept since:7d val_loss<0.3"
         searchField.addDocumentListener(object : DocumentAdapter() {
             override fun textChanged(e: DocumentEvent) = update(state)
         })
@@ -251,8 +265,8 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             selectedIds = emptySet()
         }
         updateScopes(newState)
-        val words = Search.words(searchField.text)
-        val inScope = if (words.isEmpty()) scope.runs(newState) else newState.runs.filter { Search.matches(it, words, newState.store.root) }
+        val query = searchField.text
+        val inScope = if (query.isBlank()) scope.runs(newState) else Search.filter(newState.runs, query, newState.store.root)
         val shown = RunGraph.visible(inScope, showAll)
         val rows = RunGraph.rows(shown)
         shortIds = Format.shortIds(newState.runs.map { it.id })
@@ -275,9 +289,10 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 empty.appendLine("or add hunch.init() to your training script")
                 empty.appendLine("How Hunch works", SimpleTextAttributes.LINK_PLAIN_ATTRIBUTES) { BrowserUtil.browse(README) }
             }
-            words.isNotEmpty() && inScope.isEmpty() -> {
-                empty.text = "No runs match \"${searchField.text.trim()}\""
+            query.isNotBlank() && inScope.isEmpty() -> {
+                empty.text = "No runs match \"${query.trim()}\""
                 empty.appendLine("Search looks at hypotheses, conclusions, commands, config and run ids.")
+                empty.appendLine(Search.HELP)
             }
             inScope.isEmpty() && scope == Scope.Latest -> {
                 empty.text = "No runs since M${newState.milestones.size}"
@@ -301,7 +316,7 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
             if (row.run.id in selectedIds) table.selectionModel.addSelectionInterval(index, index)
         }
         // A milestone shows its own details until a run is picked.
-        if (table.selectedRowCount == 0 && rows.isNotEmpty() && (scope !is Scope.Of || words.isNotEmpty())) table.selectionModel.setSelectionInterval(0, 0)
+        if (table.selectedRowCount == 0 && rows.isNotEmpty() && (scope !is Scope.Of || query.isNotBlank())) table.selectionModel.setSelectionInterval(0, 0)
         showDetails()
     }
 
@@ -532,6 +547,14 @@ class HunchPanel(private val project: Project, parent: Disposable) : SimpleToolW
                 }
                 service.refresh()
             }
+        }
+    }
+
+    private inner class FilterToggle(private val item: Search.MenuItem) : DumbAwareToggleAction(item.label, item.description, null) {
+        override fun getActionUpdateThread() = ActionUpdateThread.EDT
+        override fun isSelected(e: AnActionEvent) = Search.hasFilter(searchField.text, item.filter)
+        override fun setSelected(e: AnActionEvent, state: Boolean) {
+            searchField.text = Search.withFilter(searchField.text, item.filter, state)
         }
     }
 

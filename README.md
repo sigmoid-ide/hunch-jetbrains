@@ -21,7 +21,8 @@ and what it showed. Any two runs compare in the diff viewer.
 </p>
 
 - **The tree of runs**, with each run's hypothesis, main metric and its curve, and your conclusion. It updates while runs train.
-- **Search** all your runs by hypothesis, conclusion, command, config or run id.
+- **Search and filter** all your runs: by hypothesis, conclusion, command, config or run id, or with filters
+  such as `is:unreviewed`, `since:7d` or `val_loss<0.3`.
 - **Run with Hunch**: one click next to the Run widget runs any Python configuration under Hunch, asking why first.
 - **Keep or drop** a run, write its conclusion, or fix its hypothesis, right from the table.
 - **Compare** two runs, or a run with the one it came from (Ctrl+D): config, metrics and every changed code file.
@@ -35,5 +36,24 @@ and what it showed. Any two runs compare in the diff viewer.
 
 Every [release](https://github.com/sigmoid-ide/hunch-jetbrains/releases/latest) also has the plugin zip, for
 **Settings | Plugins | ⚙ | Install Plugin from Disk...**.
+
+## Search and filters
+
+Type words to find runs by hypothesis, conclusion, command, config or run id. Add filters to narrow it down,
+or pick common ones from the filter button in the tool window's toolbar:
+
+| Filter | Finds |
+|---|---|
+| `is:unreviewed` | ended runs with no verdict or conclusion yet |
+| `is:kept`, `is:dropped` | runs by verdict |
+| `is:running`, `is:crashed`, `is:stopped`, `is:lost` | runs by how they ended, or that they have not |
+| `is:remote`, `on:gpu-box` | runs on another machine (with [Ferry](https://github.com/sigmoid-ide/ferry)), or a named one |
+| `since:7d`, `since:today`, `since:2026-11-01` | runs started since then |
+| `from:a7f3` | that run and every run that came from it |
+| `branch:main` | runs started on a git branch |
+| `val_loss<0.3`, `lr=3e-4`, `optimizer=adam` | a final metric or config value (`<`, `<=`, `>`, `>=`, `=`) |
+
+A run must match every word and filter. `-` turns one around (`-is:dropped`), and commas mean either
+(`is:crashed,stopped`).
 
 <p align="center">Apache-2.0 · Part of Sigmoid IDE · Like it? Give it a star.</p>

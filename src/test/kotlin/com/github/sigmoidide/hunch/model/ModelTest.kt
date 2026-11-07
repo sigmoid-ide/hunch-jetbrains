@@ -147,16 +147,60 @@ class ModelTest {
 
     @Test
     fun `search finds runs by hypothesis, conclusion, verdict, status, command, config and id, every word`() {
-        fun found(query: String) = runs.filter { Search.matches(it, Search.words(query), store.root) }.map { it.why }
-        assertEquals(listOf("higher", "lr"), Search.words("  Higher   LR "))
-        assertEquals(listOf("higher lr"), found("HIGHER"))
+        fun found(query: String) = Search.filter(runs, query, store.root).map { it.why }
+        assertEquals(listOf("higher lr"), found("  HIGHER   "))
         assertEquals(listOf("warmup"), found("приятно")) // its conclusion
         assertEquals(listOf("warmup"), found("keep"))
         assertEquals(listOf("typo"), found("crashed"))
         assertEquals(listOf("typo"), found("train.py fail")) // its command
-        assertEquals(listOf("higher lr"), found("lr = 0.3")) // its config
+        assertEquals(listOf("higher lr"), found("lr = 0.3")) // its config, as the details show it
         assertEquals(listOf("baseline"), found(run("baseline").id.takeLast(4)))
         assertEquals(emptyList<String?>(), found("warmup baseline"))
+    }
+
+    @Test
+    fun `filters narrow a search by status, verdict, time, lineage, metrics and config`() {
+        val started = run("baseline").started.toInstant()
+        fun found(query: String, now: java.time.Instant = started.plusSeconds(3600)) = Search.filter(runs, query, store.root, now).map { it.why }
+        val all = listOf("baseline", "warmup", "typo", "higher lr")
+        assertEquals(listOf("warmup"), found("is:kept"))
+        assertEquals(listOf("baseline", "typo", "higher lr"), found("-is:kept"))
+        assertEquals(listOf("baseline", "higher lr"), found("is:unreviewed")) // a quick crash is nothing to review
+        assertEquals(listOf("typo"), found("is:crashed,stopped"))
+        assertEquals(listOf("baseline", "higher lr"), found("IS:Finished -is:kept"))
+        assertEquals(listOf("warmup", "typo"), found("val_loss<0.35"))
+        assertEquals(listOf("baseline", "higher lr"), found("val_loss>=0.4"))
+        assertEquals(listOf("baseline"), found("val_loss=0.4")) // as the table shows it: 0.4000000000000001 is 0.4
+        assertEquals(listOf("higher lr"), found("lr=3e-1")) // config, in any notation
+        assertEquals(listOf("baseline", "warmup"), found("LR<0.2 is:finished"))
+        assertEquals(listOf("warmup", "typo", "higher lr"), found("from:${run("warmup").id.takeLast(4)}"))
+        assertEquals(all, found("since:1d"))
+        assertEquals(emptyList<String?>(), found("since:1d", started.plusSeconds(3 * 24 * 3600)))
+        assertEquals(all, found("since:2026-11-04"))
+        assertEquals(emptyList<String?>(), found("since:2026-11-07"))
+        assertEquals(emptyList<String?>(), found("since:soon")) // not a filter, so a word no run has
+        assertEquals(emptyList<String?>(), found("nosuch<1"))
+
+        assertEquals("warmup", Search.withFilter("warmup  is:kept", "is:kept", false))
+        assertEquals("warmup since:7d", Search.withFilter("warmup", "since:7d", true))
+        assertTrue(Search.hasFilter("warmup since:7d", "since:7d") && !Search.hasFilter("warmup", "since:7d"))
+    }
+
+    @Test
+    fun `filters for where a run ran and the branch it started on`() {
+        val copy = Files.createTempDirectory("hunch-store")
+        copyTree(store.root, copy)
+        val copied = HunchStore(copy)
+        fun dirOf(why: String) = copied.runs().single { it.why == why }.dir
+        Files.writeString(dirOf("higher lr").resolve("remote.json"), """{"machine": "gpu-box"}""")
+        val runJson = dirOf("baseline").resolve("run.json")
+        val meta = LinkedHashMap(Json.parse(Files.readString(runJson)).asMap())
+        meta["line"] = "feature/warmup"
+        Files.writeString(runJson, Json.write(meta))
+        fun found(query: String) = Search.filter(copied.runs(), query, copied.root).map { it.why }
+        assertEquals(listOf("higher lr"), found("is:remote"))
+        assertEquals(listOf("higher lr"), found("on:GPU"))
+        assertEquals(listOf("baseline"), found("branch:feature"))
     }
 
     private fun copyTree(from: Path, to: Path) {
