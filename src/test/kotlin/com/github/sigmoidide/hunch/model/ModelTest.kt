@@ -326,3 +326,36 @@ class MachinesTest {
         assertTrue(MachinesAnswer.of(true, "not json", "") is MachinesAnswer.Failed)
     }
 }
+
+class OffersTest {
+    @Test
+    fun `reads the GPUs Ferry can rent, and tells an old Ferry`() {
+        val listed = OffersAnswer.of(true, """{"understood": "RTX 3060, in Canada", "offers": [{"id": 59812282, "machine": 1, "gpu": "RTX 3060", "count": 1, "memory": 12.0, "price": 0.0644,
+            "reliability": 0.996, "tier": "verified", "place": "Quebec, CA", "download": 1465.2, "up_cost": 0.0065},
+            {"id": 7, "gpu": "RTX 4090", "count": 2, "memory": 24, "price": 0.8}, {"gpu": "no id"}]}""", "")
+        val offers = (listed as OffersAnswer.Found).offers
+        assertEquals("RTX 3060, in Canada", listed.understood)
+        assertEquals(listOf(59812282L, 7L), offers.map { it.id })
+        assertEquals("Quebec, CA", offers[0].place)
+        assertEquals(0.0065, offers[0].upCost, 1e-9)
+        assertEquals("2x RTX 4090", offers[1].label)
+        assertEquals(OffersAnswer.OldFerry, OffersAnswer.of(false, "", "usage: ferry\nferry: error: argument command: invalid choice: 'gpus'\n"))
+        assertEquals(OffersAnswer.Failed("could not reach Vast.ai: timed out"), OffersAnswer.of(false, "", "ferry: could not reach Vast.ai: timed out\n"))
+        assertTrue(OffersAnswer.of(true, "not json", "") is OffersAnswer.Failed)
+    }
+
+    @Test
+    fun `reads the time a rented machine may run as Ferry does, and what it can cost`() {
+        assertEquals(7200, Rental.seconds("2h"))
+        assertEquals(5400, Rental.seconds(" 1h30m "))
+        assertEquals(5400, Rental.seconds("90m"))
+        assertEquals(5400, Rental.seconds("1.5H"))
+        for (bad in listOf("", "2", "5m", "2 hours", "h")) assertNull(bad, Rental.seconds(bad))
+        val offer = Offer(1, "RTX 3060", 1, 12.0, 0.0644, 1.0, "verified", "?", 0.0, 0.0)
+        assertEquals("\$0.13", Rental.dollars(Rental.most(offer, 7200)))
+        assertEquals("under a cent", Rental.dollars(0.004))
+        assertEquals(listOf(1800, 3600, 7200, 14400, 28800, 43200, 86400), Rental.TIMES.map { Rental.seconds(it.first) })
+        assertEquals("at most \$0.13, data free", Rental.cost(offer, 7200))
+        assertEquals("at most \$0.13, plus \$0.0065 per GB you send it", Rental.cost(offer.copy(upCost = 0.0065), 7200))
+    }
+}
