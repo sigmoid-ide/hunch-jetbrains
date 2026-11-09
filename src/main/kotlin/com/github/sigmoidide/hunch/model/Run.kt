@@ -3,8 +3,18 @@ package com.github.sigmoidide.hunch.model
 import java.nio.file.Path
 import java.time.OffsetDateTime
 
-/** Where a run that Ferry copies home from another machine ran (remote.json, which only this computer has). */
-data class Remote(val machine: String, val syncedAt: OffsetDateTime?)
+/**
+ * Where a run that Ferry copies home from another machine ran (remote.json, which only this computer has).
+ * On a machine Ferry rented, also who from, such as "vast", and the country it was in, such as "PL".
+ */
+data class Remote(val machine: String, val syncedAt: OffsetDateTime?, val provider: String? = null, val country: String? = null)
+
+/** What a run on a rented machine cost, in US dollars (cost.json, which Ferry writes once the run is home). */
+data class Cost(
+    val dollars: Double,
+    /** The provider's own charge, rather than Ferry's estimate. */
+    val billed: Boolean,
+)
 
 /**
  * One run folder, read back. Mirrors hunch's RunRecord (store.py), following the
@@ -20,6 +30,7 @@ class Run(
     /** metrics.jsonl rows; only read for runs still in progress. */
     private val liveRows: List<Map<String, Any?>>,
     val remote: Remote? = null,
+    val cost: Cost? = null,
 ) {
     val id: String = dir.fileName.toString()
     val started: OffsetDateTime = OffsetDateTime.parse(meta["started_at"] as String)

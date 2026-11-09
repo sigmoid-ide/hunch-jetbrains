@@ -55,7 +55,7 @@ class HunchStore(val root: Path) {
     }
 
     /**
-     * Changes whenever a run starts, ends, gets a note, or logs a metric while running.
+     * Changes whenever a run starts, ends, gets a note, logs a metric while running, or gets its cost.
      * Cheap: one directory listing and a few file sizes and times per run.
      */
     fun signature(): Long {
@@ -129,7 +129,13 @@ class HunchStore(val root: Path) {
                     Remote(
                         machine = remote["machine"] as? String ?: "another machine",
                         syncedAt = (remote["synced_at"] as? String)?.let { runCatching { OffsetDateTime.parse(it) }.getOrNull() },
+                        provider = remote["provider"] as? String,
+                        country = remote["country"] as? String,
                     )
+                },
+                cost = readJson(folder.resolve("cost.json")).asMap().let { cost ->
+                    val billed = cost["billed"].asDouble()
+                    (billed ?: cost["estimate"].asDouble())?.takeIf { it.isFinite() }?.let { Cost(it, billed != null) }
                 },
             )
         } catch (_: RuntimeException) {
@@ -138,7 +144,7 @@ class HunchStore(val root: Path) {
     }
 
     companion object {
-        private val WATCHED_FILES = listOf("run.json", "end.json", "notes.jsonl", "metrics.jsonl")
+        private val WATCHED_FILES = listOf("run.json", "end.json", "notes.jsonl", "metrics.jsonl", "cost.json")
 
         /**
          * The store for a project folder: the nearest folder with .hunch/runs from `start`

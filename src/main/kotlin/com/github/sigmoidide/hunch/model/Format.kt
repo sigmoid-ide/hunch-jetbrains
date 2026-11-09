@@ -2,6 +2,7 @@ package com.github.sigmoidide.hunch.model
 
 import java.math.BigDecimal
 import java.math.MathContext
+import java.math.RoundingMode
 import java.nio.file.InvalidPathException
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -66,6 +67,20 @@ object Format {
         val d = h / 24
         h %= 24
         return "${d}d ${h}h"
+    }
+
+    /** "vast-59870289 (Vast.ai, PL)": the machine, and for a rented one who rented it out and the country it was in. */
+    fun machine(remote: Remote): String {
+        val where = listOfNotNull(if (remote.provider == "vast") "Vast.ai" else remote.provider, remote.country)
+            .filter { it.isNotEmpty() }.joinToString(", ")
+        return if (where.isEmpty()) remote.machine else "${remote.machine} ($where)"
+    }
+
+    /** "about $0.02" for Ferry's estimate, "$0.02" once billed, and "under a cent" for less, as Ferry says it. */
+    fun cost(cost: Cost): String {
+        if (cost.dollars < 0.01) return "under a cent"
+        val amount = "\$" + BigDecimal(cost.dollars).setScale(2, RoundingMode.HALF_UP).toPlainString()
+        return if (cost.billed) amount else "about $amount"
     }
 
     /** What `hunch log` shows in the result column. */

@@ -4,6 +4,7 @@ import com.github.sigmoidide.hunch.ui.HunchState
 import com.github.sigmoidide.hunch.ui.Scope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -146,6 +147,34 @@ class ModelTest {
     }
 
     @Test
+    fun `a run on a rented machine knows where it ran and what it cost`() {
+        val copy = Files.createTempDirectory("hunch-store")
+        copyTree(store.root, copy)
+        val copied = HunchStore(copy)
+        val folder = copied.runs().single { it.why == "higher lr" }.dir
+        fun reread() = copied.runs().single { it.why == "higher lr" }
+        assertNull(reread().cost)
+        Files.writeString(folder.resolve("cost.json"), """{"estimate": 0.0""")
+        assertNull(reread().cost) // a broken cost.json is no cost
+
+        val signature = copied.signature()
+        Files.writeString(folder.resolve("remote.json"), """{"machine": "vast-59870289", "dir": "/root/.ferry/x", "synced_at": "2026-11-09T14:03:00+05:00", "complete": true,
+            "provider": "vast", "tier": "verified", "country": "PL", "price": 0.0674}""")
+        Files.writeString(folder.resolve("cost.json"), """{"provider": "vast", "machine": "vast-59870289", "gpu": "NVIDIA GeForce RTX 3060", "rate": 0.06740740740740742,
+            "disk_rate": 0.007407, "running_seconds": 48, "stopped_seconds": 0, "estimate": 0.0009, "currency": "USD", "billed": null}""")
+        assertNotEquals(signature, copied.signature())
+        val rented = reread()
+        assertEquals("finished", rented.status)
+        assertEquals(Cost(0.0009, billed = false), rented.cost)
+        assertEquals("vast-59870289 (Vast.ai, PL)", Format.machine(rented.remote!!))
+        assertEquals("under a cent", Format.cost(rented.cost!!))
+
+        Files.writeString(folder.resolve("cost.json"), """{"estimate": 0.0213, "billed": 0.0241}""")
+        assertEquals(Cost(0.0241, billed = true), reread().cost)
+        assertEquals("\$0.02", Format.cost(reread().cost!!))
+    }
+
+    @Test
     fun `search finds runs by hypothesis, conclusion, verdict, status, command, config and id, every word`() {
         fun found(query: String) = Search.filter(runs, query, store.root).map { it.why }
         assertEquals(listOf("higher lr"), found("  HIGHER   "))
@@ -272,6 +301,16 @@ class FormatTest {
         assertEquals("41s", Format.duration(41.2))
         assertEquals("12m 3s", Format.duration(723.0))
         assertEquals("2h 5m", Format.duration(7500.0))
+    }
+
+    @Test
+    fun `costs and machines read the way Ferry says them`() {
+        assertEquals(
+            listOf("about \$0.02", "about \$1.24", "\$0.02", "under a cent"),
+            listOf(Cost(0.0213, false), Cost(1.237, false), Cost(0.0213, true), Cost(0.004, true)).map(Format::cost),
+        )
+        assertEquals("gpu-box", Format.machine(Remote("gpu-box", null)))
+        assertEquals("box (other)", Format.machine(Remote("box", null, provider = "other", country = "")))
     }
 }
 
