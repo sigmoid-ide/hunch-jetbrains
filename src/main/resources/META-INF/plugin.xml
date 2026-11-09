@@ -54,6 +54,8 @@
         <notificationGroup id="Hunch" displayType="BALLOON"/>
         <executor implementation="com.github.sigmoidide.hunch.run.HunchExecutor"/>
         <programRunner implementation="com.github.sigmoidide.hunch.run.HunchProgramRunner"/>
+        <executor implementation="com.github.sigmoidide.hunch.run.FerryExecutor"/>
+        <programRunner implementation="com.github.sigmoidide.hunch.run.FerryProgramRunner"/>
     </extensions>
 
     <actions>

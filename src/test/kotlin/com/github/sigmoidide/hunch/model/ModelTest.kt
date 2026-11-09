@@ -274,3 +274,16 @@ class FormatTest {
         assertEquals("2h 5m", Format.duration(7500.0))
     }
 }
+
+class MachinesTest {
+    @Test
+    fun `reads Ferry's machines, and tells a missing Ferry from an old one`() {
+        val listed = MachinesAnswer.of(true, """[{"name": "gpu", "host": "10.0.0.5", "user": "me", "port": 22, "gpu": "RTX 3060"}, {"name": "cpu", "host": "box"}, {"host": "x"}]""", "")
+        assertEquals(MachinesAnswer.Found(listOf(Machine("gpu", "10.0.0.5", "me", "RTX 3060"), Machine("cpu", "box", null, null))), listed)
+        assertEquals(MachinesAnswer.Found(emptyList()), MachinesAnswer.of(true, "[]\n", ""))
+        assertEquals(MachinesAnswer.NoFerry, MachinesAnswer.of(false, "", "C:\\py\\python.exe: No module named ferry\n"))
+        assertEquals(MachinesAnswer.OldFerry, MachinesAnswer.of(false, "", "usage: ferry [-h]\nferry: error: unrecognized arguments: --json\n"))
+        assertEquals(MachinesAnswer.Failed("the machines file is broken"), MachinesAnswer.of(false, "", "Traceback...\nferry: the machines file is broken\n"))
+        assertTrue(MachinesAnswer.of(true, "not json", "") is MachinesAnswer.Failed)
+    }
+}

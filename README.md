@@ -24,6 +24,8 @@ and what it showed. Any two runs compare in the diff viewer.
 - **Search and filter** all your runs: by hypothesis, conclusion, command, config or run id, or with filters
   such as `is:unreviewed`, `since:7d` or `val_loss<0.3`.
 - **Run with Hunch**: one click next to the Run widget runs any Python configuration under Hunch, asking why first.
+  **Run with Hunch on...**, in the Run widget's menu, runs it on one of your GPU machines with
+  [Ferry](https://github.com/sigmoid-ide/ferry) (0.1.2 or newer, in the same interpreter) and brings the run home.
 - **Keep or drop** a run, write its conclusion, or fix its hypothesis, right from the table.
 - **Compare** two runs, or a run with the one it came from (Ctrl+D): config, metrics and every changed code file.
 - **Milestones**: save one from the toolbar when you find something worth remembering, then browse your runs milestone by milestone.
