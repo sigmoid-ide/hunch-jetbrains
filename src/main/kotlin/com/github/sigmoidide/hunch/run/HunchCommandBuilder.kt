@@ -10,18 +10,20 @@ import com.jetbrains.python.run.target.HelpersAwareTargetEnvironmentRequest
 
 /**
  * Turns the configuration's `python script.py args` (or `python -m module args`) into
- * `python -m hunch run --why=... -- <interpreter> script.py args`, keeping its working
- * directory, environment and charset.
+ * `python -m <module> <args> -- <interpreter> script.py args`, such as `python -m hunch run --why=...`
+ * or `python -m ferry run --on gpu --why=...`, keeping its working directory, environment and charset.
  *
- * hunch resolves the first word after `--` with `shutil.which`, so [interpreter] must be the
- * interpreter's full path. Interpreter options go after it, so they reach the user's script;
- * PyCharm also passes them to the outer `python -m hunch`, as it does for every run.
+ * hunch resolves the first word after `--` with `shutil.which`, and Ferry builds the machine's
+ * environment from it, so [interpreter] must be the interpreter's full path. Interpreter options go
+ * after it, so they reach the user's script; PyCharm also passes them to the outer `python -m`, as it
+ * does for every run.
  *
  * This is the only class that touches PyCharm's experimental PythonExecution API.
  */
 class HunchCommandBuilder(
+    private val module: String,
+    private val args: List<String>,
     private val interpreter: String,
-    private val hypothesis: String,
     private val interpreterOptions: List<String>,
 ) : PythonScriptTargetedCommandLineBuilder {
 
@@ -32,9 +34,9 @@ class HunchCommandBuilder(
             else -> throw ExecutionException("Run with Hunch can only run a Python script or module")
         }
         return PythonModuleExecution().apply {
-            moduleName = "hunch"
-            // --why= keeps a hypothesis that starts with "-" from being read as an option.
-            addParameters("run", "--why=$hypothesis", "--", interpreter)
+            moduleName = module
+            addParameters(args)
+            addParameters("--", interpreter)
             addParameters(interpreterOptions)
             target.forEach(::addParameter)
             parameters += pythonScript.parameters

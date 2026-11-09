@@ -39,66 +39,81 @@ class HunchProgramRunner : AsyncProgramRunner<RunnerSettings>() {
 
     override fun execute(environment: ExecutionEnvironment, state: RunProfileState): Promise<RunContentDescriptor?> {
         val config = environment.runProfile as PythonRunConfiguration
-        val interpreter = localInterpreter(config)
-        // Macros such as $FilePath$ expand from the data context the platform keeps in the
-        // thread context while it starts a run. The popup comes in between, so carry it over.
-        val context = currentThreadContext().minusKey(Job)
-        val descriptor = CompletableFuture<RunContentDescriptor?>()
+        val start = Start(environment, state, localInterpreter(config))
         val app = ApplicationManager.getApplication()
         app.executeOnPooledThread {
-            if (HunchInstallation.isMissing(interpreter, config.workingDirectorySafe)) {
-                HunchInstallation.notifyMissing(environment.project, interpreter)
-                descriptor.complete(null)
+            if (HunchInstallation.isMissing(start.interpreter, config.workingDirectorySafe)) {
+                HunchInstallation.notifyMissing(environment.project, start.interpreter)
+                start.cancel()
                 return@executeOnPooledThread
             }
-            app.invokeLater {
-                HypothesisPopup.show(environment.project) { hypothesis ->
-                    if (hypothesis == null) {
-                        descriptor.complete(null)
-                    } else {
-                        // hunch snapshots the code from disk when the run starts.
-                        WriteAction.run<RuntimeException> { FileDocumentManager.getInstance().saveAllDocuments() }
-                        app.executeOnPooledThread { launch(environment, state, interpreter, hypothesis, context, descriptor) }
-                    }
-                }
-            }
+            app.invokeLater { start.askWhyAndLaunch("hunch") { why -> listOf("run", "--why=$why") } }
         }
-        return descriptor.asPromise()
+        return start.descriptor.asPromise()
+    }
+}
+
+/**
+ * One start of a run configuration under `python -m <module>`: made while the platform starts the
+ * run, finished by [askWhyAndLaunch] or [cancel], from any thread.
+ */
+internal class Start(
+    private val environment: ExecutionEnvironment,
+    private val state: RunProfileState,
+    val interpreter: String,
+) {
+    val descriptor = CompletableFuture<RunContentDescriptor?>()
+
+    // Macros such as $FilePath$ expand from the data context the platform keeps in the
+    // thread context while it starts a run. The popups come in between, so carry it over.
+    private val context: CoroutineContext = currentThreadContext().minusKey(Job)
+
+    fun cancel() {
+        descriptor.complete(null)
     }
 
-    private fun launch(
-        environment: ExecutionEnvironment,
-        state: RunProfileState,
-        interpreter: String,
-        hypothesis: String,
-        context: CoroutineContext,
-        descriptor: CompletableFuture<RunContentDescriptor?>,
-    ) {
+    /**
+     * Asks for the hypothesis on the UI thread, then saves every file, since the run snapshots
+     * the code from disk, and starts `python -m <module> <args(why)> -- <interpreter> ...`.
+     * `--why=` keeps a hypothesis that starts with "-" from being read as an option.
+     */
+    fun askWhyAndLaunch(module: String, args: (String) -> List<String>) {
+        HypothesisPopup.show(environment.project) { hypothesis ->
+            if (hypothesis == null) {
+                cancel()
+            } else {
+                WriteAction.run<RuntimeException> { FileDocumentManager.getInstance().saveAllDocuments() }
+                ApplicationManager.getApplication().executeOnPooledThread { launch(module, args(hypothesis)) }
+            }
+        }
+    }
+
+    private fun launch(module: String, args: List<String>) {
         try {
             val pythonState = state as PythonCommandLineState
-            val builder = HunchCommandBuilder(interpreter, hypothesis, pythonState.configuredInterpreterParameters)
+            val builder = HunchCommandBuilder(module, args, interpreter, pythonState.configuredInterpreterParameters)
             val result = installThreadContext(context, true) { pythonState.execute(environment.executor, builder) }
             ApplicationManager.getApplication().invokeLater { descriptor.complete(showRunContent(result, environment)) }
         } catch (e: Throwable) {
             descriptor.completeExceptionally(e)
         }
     }
+}
 
-    /**
-     * The interpreter's path, when the run will happen on this machine. hunch must find that path
-     * with `shutil.which`, which a path from SSH, Docker or WSL would defeat, so those are refused.
-     */
-    private fun localInterpreter(config: PythonRunConfiguration): String {
-        val sdk = config.sdk ?: throw ExecutionException("'${config.name}' has no Python interpreter.")
-        val home = sdk.homePath ?: throw ExecutionException("The interpreter of '${config.name}' has no path.")
-        val local = !PythonSdkUtil.isRemote(sdk) &&
-            try { Path.of(home).getEelDescriptor() is LocalEelDescriptor } catch (_: InvalidPathException) { false }
-        if (!local) {
-            throw ExecutionException(
-                "Run with Hunch works only with local interpreters, and '${config.name}' uses ${sdk.name} " +
-                    "on another machine (SSH, WSL or Docker). Run it there with: python -m hunch run -- python ...",
-            )
-        }
-        return home
+/**
+ * The interpreter's path, when the run will happen on this machine. hunch must find that path
+ * with `shutil.which`, which a path from SSH, Docker or WSL would defeat, so those are refused.
+ */
+internal fun localInterpreter(config: PythonRunConfiguration): String {
+    val sdk = config.sdk ?: throw ExecutionException("'${config.name}' has no Python interpreter.")
+    val home = sdk.homePath ?: throw ExecutionException("The interpreter of '${config.name}' has no path.")
+    val local = !PythonSdkUtil.isRemote(sdk) &&
+        try { Path.of(home).getEelDescriptor() is LocalEelDescriptor } catch (_: InvalidPathException) { false }
+    if (!local) {
+        throw ExecutionException(
+            "Run with Hunch works only with local interpreters, and '${config.name}' uses ${sdk.name} " +
+                "on another machine (SSH, WSL or Docker). Run it there with: python -m hunch run -- python ...",
+        )
     }
+    return home
 }
